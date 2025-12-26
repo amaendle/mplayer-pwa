@@ -291,18 +291,17 @@ function renderTracklist(activeTrackId) {
   const actions = document.createElement("div");
   actions.className = "albumActions";
 
-  const playNowBtn = document.createElement("button");
-  playNowBtn.type = "button";
-  playNowBtn.className = "primary";
-  playNowBtn.textContent = "Play now";
-  playNowBtn.onclick = () => playAlbumNow(album.id);
-  actions.appendChild(playNowBtn);
-
   const playLaterBtn = document.createElement("button");
   playLaterBtn.type = "button";
   playLaterBtn.textContent = "Play later";
   playLaterBtn.onclick = () => queueAlbumLater(album.id);
   actions.appendChild(playLaterBtn);
+
+  const stopBtn = document.createElement("button");
+  stopBtn.type = "button";
+  stopBtn.textContent = "Stop / eject";
+  stopBtn.onclick = stopAndReturnToAlbums;
+  actions.appendChild(stopBtn);
 
   tracklistEl.appendChild(actions);
 
@@ -640,6 +639,18 @@ function queueAlbumLater(albumId) {
 
   queue.push(...album.tracks);
   setStatus(`Added ${album.tracks.length} track(s) to the queue.`);
+}
+
+function stopAndReturnToAlbums() {
+  audio.pause();
+  audio.currentTime = 0;
+  isPlaying = false;
+  queue = [];
+  queueIndex = 0;
+  currentAlbumId = null;
+  setNowPlayingUI(null);
+  goToAlbumsView();
+  setStatus("Playback stopped.");
 }
 
 async function playTrackById(trackId) {
