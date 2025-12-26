@@ -217,14 +217,17 @@ function renderAlbums(albums) {
     //  </div>
     //`;
 
-    tile.onclick = () => {
+    tile.onclick = async () => {
       currentAlbumId = a.id;
       buildQueueFromAlbum(a.id);
       queueIndex = 0;
-      playCurrent().catch(err => {
+      try {
+        await playCurrent();
+        openNowView();
+      } catch (err) {
         console.warn(err);
         setStatus("Could not play this track. Try another one or reconnect folder.");
-      });
+      }
     };
 
     gridEl.appendChild(tile);
