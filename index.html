@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#111111" />
   <title>MP3 Tiles Player</title>
@@ -84,13 +84,9 @@
       background:var(--bg);
       display:none;
       padding:16px 16px 96px;
+      overflow-y:auto;
     }
     .nowView.open { display:block; }
-    .nowTop { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-    .nowTop button {
-      background:var(--card); color:var(--fg); border:1px solid var(--line);
-      padding:10px 12px; border-radius:14px; cursor:pointer;
-    }
     .bigCover {
       margin-top:14px;
       width:min(420px, 92vw);
@@ -148,6 +144,41 @@
     .nowAlbumPreview .thumb img {
       width:100%; height:100%; object-fit:cover; display:block;
     }
+
+    /* Tracklist */
+    .tracklist {
+      margin-top:12px;
+      padding:10px;
+      border-radius:16px;
+      border:1px solid var(--line);
+      background:var(--card);
+    }
+    .tracklistTitle {
+      font-weight:700;
+      font-size:14px;
+      margin:2px 0 8px;
+      color:var(--mut);
+    }
+    .trackRows { display:flex; flex-direction:column; gap:4px; }
+    .trackRow {
+      width:100%;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 8px;
+      border-radius:12px;
+      border:1px solid transparent;
+      background:none;
+      color:inherit;
+      text-align:left;
+      cursor:pointer;
+    }
+    .trackRow .num { width:28px; color:var(--mut); font-variant-numeric: tabular-nums; }
+    .trackRow .meta { flex:1; min-width:0; }
+    .trackRow .meta .title { font-weight:650; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .trackRow .meta .artist { color:var(--mut); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .trackRow .state { width:18px; text-align:right; color:var(--mut); }
+    .trackRow.active { border-color:var(--line); background:rgba(255,255,255,.04); }
   </style>
 </head>
 <body>
@@ -174,11 +205,6 @@
 
   <!-- Fullscreen Now Playing -->
   <div class="nowView" id="nowView" aria-hidden="true">
-    <div class="nowTop">
-      <button id="btnBackToAlbums">Albums</button>
-      <button id="btnOpenLibraryFromNow">Library</button>
-    </div>
-
     <div class="nowAlbumPreview" id="nowAlbumPreview" title="Show albums"></div>
 
     <div class="bigCover" id="bigCover">Cover</div>
@@ -191,6 +217,8 @@
       <button id="btnBigPlay">⏯</button>
       <button id="btnBigNext">⏭</button>
     </div>
+
+    <div class="tracklist" id="tracklist" aria-label="Album tracklist"></div>
   </div>
 
   <!-- Player bar -->
