@@ -219,6 +219,14 @@ function renderAlbums(albums) {
 
     tile.onclick = async () => {
       currentAlbumId = a.id;
+
+      // If music is already playing, open the album view without altering the queue
+      if (!audio.paused && queue.length) {
+        renderTracklist(queue[queueIndex] ?? null);
+        openNowView();
+        return;
+      }
+
       buildQueueFromAlbum(a.id);
       queueIndex = 0;
       try {
@@ -279,6 +287,24 @@ function renderTracklist(activeTrackId) {
   title.className = "tracklistTitle";
   title.textContent = `${album.title} — ${album.artist}`;
   tracklistEl.appendChild(title);
+
+  const actions = document.createElement("div");
+  actions.className = "albumActions";
+
+  const playNowBtn = document.createElement("button");
+  playNowBtn.type = "button";
+  playNowBtn.className = "primary";
+  playNowBtn.textContent = "Play now";
+  playNowBtn.onclick = () => playAlbumNow(album.id);
+  actions.appendChild(playNowBtn);
+
+  const playLaterBtn = document.createElement("button");
+  playLaterBtn.type = "button";
+  playLaterBtn.textContent = "Play later";
+  playLaterBtn.onclick = () => queueAlbumLater(album.id);
+  actions.appendChild(playLaterBtn);
+
+  tracklistEl.appendChild(actions);
 
   const rows = document.createElement("div");
   rows.className = "trackRows";
@@ -523,6 +549,7 @@ async function scanAndBuildLibrary(dir) {
       title,
       artist,
       album,
+      albumId,
       trackNo: safeTrackNo,
       fileHandle: item.fileHandle,
     };
@@ -581,6 +608,38 @@ function buildQueueFromAlbum(albumId) {
   const album = library.albumsById.get(albumId);
   if (!album) return;
   queue = [...album.tracks];
+}
+
+function playAlbumNow(albumId) {
+  const album = library.albumsById.get(albumId);
+  if (!album || !album.tracks.length) {
+    setStatus("This album has no tracks to play.");
+    return;
+  }
+
+  currentAlbumId = album.id;
+  buildQueueFromAlbum(album.id);
+  queueIndex = 0;
+  playCurrent().then(() => openNowView()).catch(err => {
+    console.warn(err);
+    setStatus("Could not play this album. Try another one or reconnect folder.");
+  });
+}
+
+function queueAlbumLater(albumId) {
+  const album = library.albumsById.get(albumId);
+  if (!album || !album.tracks.length) {
+    setStatus("This album has no tracks to add.");
+    return;
+  }
+
+  if (!queue.length) {
+    playAlbumNow(albumId);
+    return;
+  }
+
+  queue.push(...album.tracks);
+  setStatus(`Added ${album.tracks.length} track(s) to the queue.`);
 }
 
 async function playTrackById(trackId) {

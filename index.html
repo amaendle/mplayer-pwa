@@ -153,6 +153,26 @@
       border:1px solid var(--line);
       background:var(--card);
     }
+    .albumActions {
+      display:flex;
+      gap:8px;
+      margin:6px 0 12px;
+    }
+    .albumActions button {
+      flex:1;
+      padding:10px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:var(--card);
+      color:var(--fg);
+      cursor:pointer;
+      font-weight:650;
+    }
+    .albumActions button.primary {
+      background:linear-gradient(135deg, #3c82ff, #7c4dff);
+      border-color:transparent;
+      color:white;
+    }
     .tracklistTitle {
       font-weight:700;
       font-size:14px;
