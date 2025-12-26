@@ -86,11 +86,6 @@
       padding:16px 16px 96px;
     }
     .nowView.open { display:block; }
-    .nowTop { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-    .nowTop button {
-      background:var(--card); color:var(--fg); border:1px solid var(--line);
-      padding:10px 12px; border-radius:14px; cursor:pointer;
-    }
     .bigCover {
       margin-top:14px;
       width:min(420px, 92vw);
@@ -174,11 +169,6 @@
 
   <!-- Fullscreen Now Playing -->
   <div class="nowView" id="nowView" aria-hidden="true">
-    <div class="nowTop">
-      <button id="btnBackToAlbums">Albums</button>
-      <button id="btnOpenLibraryFromNow">Library</button>
-    </div>
-
     <div class="nowAlbumPreview" id="nowAlbumPreview" title="Show albums"></div>
 
     <div class="bigCover" id="bigCover">Cover</div>

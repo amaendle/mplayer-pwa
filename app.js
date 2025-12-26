@@ -64,9 +64,6 @@ const bigTitleEl = document.getElementById("bigTitle");
 const bigSubEl = document.getElementById("bigSub");
 const nowAlbumPreviewEl = document.getElementById("nowAlbumPreview");
 
-document.getElementById("btnBackToAlbums").onclick = () => goToAlbumsView();
-document.getElementById("btnOpenLibraryFromNow").onclick = () => { closeNowView(); toggleDrawer(); };
-
 document.getElementById("btnBigPrev").onclick = prev;
 document.getElementById("btnBigPlay").onclick = playPause;
 document.getElementById("btnBigNext").onclick = next;
