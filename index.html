@@ -173,6 +173,21 @@
       text-align:left;
       cursor:pointer;
     }
+    .albumActions {
+      display:flex;
+      gap:8px;
+      margin:6px 0 10px;
+    }
+    .albumActions button {
+      flex:1;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:var(--card);
+      color:var(--fg);
+      cursor:pointer;
+    }
+    .albumActions button:active { transform: translateY(1px); }
     .trackRow .num { width:28px; color:var(--mut); font-variant-numeric: tabular-nums; }
     .trackRow .meta { flex:1; min-width:0; }
     .trackRow .meta .title { font-weight:650; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
