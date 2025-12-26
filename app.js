@@ -191,15 +191,16 @@ function clearPlayLater() {
 
   if (wasViewingPlayLater) {
     audio.pause();
+    try { audio.currentTime = 0; } catch {}
     isPlaying = false;
     queue = [];
     queueIndex = 0;
-    currentAlbumId = null;
     setNowPlayingUI(null);
+  } else {
+    renderTracklist(queue[queueIndex] ?? null);
   }
 
   renderAlbums(library.albums);
-  renderTracklist(wasViewingPlayLater ? null : queue[queueIndex] ?? null);
   setStatus("Cleared Play later list.");
   savePlayerState().catch(() => {});
 }
