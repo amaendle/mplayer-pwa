@@ -22,6 +22,8 @@
 
     .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:12px; }
     .tile { background:var(--card); border:1px solid var(--line); border-radius:18px; overflow:hidden; cursor:pointer; }
+    .tile.playLaterTile { outline:1px dashed var(--line); }
+    .tile.playLaterTile .cover { background:#26263a; color:#f9f9f9; font-size:28px; }
     .cover { width:100%; aspect-ratio:1/1; background:#2a2a2f; display:flex; align-items:center; justify-content:center; color:var(--mut); }
     .meta { padding:10px; }
     .album { font-weight:650; font-size:14px; margin:0 0 3px; }
@@ -153,11 +155,25 @@
       border:1px solid var(--line);
       background:var(--card);
     }
-    .tracklistTitle {
-      font-weight:700;
-      font-size:14px;
-      margin:2px 0 8px;
-      color:var(--mut);
+    .albumActions {
+      display:flex;
+      gap:8px;
+      margin:6px 0 12px;
+    }
+    .albumActions button {
+      flex:1;
+      padding:10px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:var(--card);
+      color:var(--fg);
+      cursor:pointer;
+      font-weight:650;
+    }
+    .albumActions button.primary {
+      background:linear-gradient(135deg, #3c82ff, #7c4dff);
+      border-color:transparent;
+      color:white;
     }
     .trackRows { display:flex; flex-direction:column; gap:4px; }
     .trackRow {
@@ -185,7 +201,6 @@
   <header>
     <h1>MP3 Tiles Player</h1>
     <button id="btnLibrary">Library</button>
-    <button id="btnConnect">Add Music</button>
   </header>
 
   <div class="wrap">
@@ -199,6 +214,8 @@
       <h2>Library</h2>
       <div class="small" id="libInfo">No folder connected yet.</div>
       <button id="btnReconnect">Reconnect / Request Permission</button>
+      <button id="btnConnect">Add Music</button>
+      <button id="btnClearLibrary">Remove all folders</button>
       <button id="btnCloseDrawer">Close</button>
     </div>
   </div>
