@@ -95,7 +95,7 @@ function updateNowViewUI(track) {
   // cover: use album cover if we have it
   let coverUrl = null;
   if (track && currentAlbumId) {
-    const alb = library.albumsById.get(currentAlbumId);
+    const alb = getAlbumById(currentAlbumId);
     coverUrl = alb?.coverUrl || null;
   }
   bigCoverEl.innerHTML = coverUrl
@@ -131,6 +131,9 @@ let library = {
   albumsById: new Map(),
 };
 
+const PLAY_LATER_ID = "playlist:play-later";
+let playLaterTracks = [];
+
 let queue = [];        // array of trackIds
 let queueIndex = 0;
 let isPlaying = false;
@@ -146,7 +149,8 @@ async function savePlayerState() {
     queueIndex,
     currentTrackId,
     position: audio.currentTime || 0,
-    wasPlaying: !audio.paused
+    wasPlaying: !audio.paused,
+    playLaterTracks,
   };
   await idbSet(STATE_KEY, state);
 }
@@ -174,23 +178,34 @@ function closeDrawer() {
 }
 
 // ===== Rendering =====
+function getPlayLaterAlbum() {
+  return {
+    id: PLAY_LATER_ID,
+    title: "Play later",
+    artist: playLaterTracks.length ? `${playLaterTracks.length} track(s)` : "Add albums with Play later",
+    coverUrl: "",
+    tracks: [...playLaterTracks],
+    isPlayLater: true,
+  };
+}
+
+function albumsWithPlayLater(albums) {
+  return [getPlayLaterAlbum(), ...albums];
+}
+
 function renderAlbums(albums) {
   gridEl.innerHTML = "";
 
-  if (!albums.length) {
-    gridEl.innerHTML = `<div style="color:#a7a7a7;">No albums yet. Connect a folder with MP3 files.</div>`;
-    renderNowAlbumPreview(albums);
-    return;
-  }
+  const allAlbums = albumsWithPlayLater(albums);
 
-  for (const a of albums) {
+  for (const a of allAlbums) {
     const tile = document.createElement("div");
-    tile.className = "tile";
+    tile.className = "tile" + (a.isPlayLater ? " playLaterTile" : "");
 
     // obvious tap to play overlay:
     const cover = a.coverUrl
       ? `<img alt="" src="${a.coverUrl}" style="width:100%;height:100%;object-fit:cover;display:block;">`
-      : `<div class="cover">No cover</div>`;
+      : `<div class="cover">${a.isPlayLater ? "⏩" : "No cover"}</div>`;
     
     tile.innerHTML = `
       <div class="cover" style="padding:0; position:relative;">
@@ -229,6 +244,12 @@ function renderAlbums(albums) {
 
       buildQueueFromAlbum(a.id);
       queueIndex = 0;
+
+      if (!queue.length) {
+        setStatus(a.isPlayLater ? "Your Play later list is empty." : "This album has no tracks to play.");
+        return;
+      }
+
       try {
         await playCurrent();
         openNowView();
@@ -241,7 +262,14 @@ function renderAlbums(albums) {
     gridEl.appendChild(tile);
   }
 
-  renderNowAlbumPreview(albums);
+  if (!albums.length) {
+    const emptyMsg = document.createElement("div");
+    emptyMsg.style.color = "#a7a7a7";
+    emptyMsg.textContent = "No albums yet. Connect a folder with MP3 files.";
+    gridEl.appendChild(emptyMsg);
+  }
+
+  renderNowAlbumPreview(allAlbums);
 }
 
 function renderNowAlbumPreview(albums) {
@@ -274,7 +302,7 @@ function renderTracklist(activeTrackId) {
     return;
   }
 
-  const album = library.albumsById.get(currentAlbumId);
+  const album = getAlbumById(currentAlbumId);
   if (!album) {
     tracklistEl.textContent = "Album not found.";
     tracklistEl.style.color = "var(--mut)";
@@ -285,17 +313,19 @@ function renderTracklist(activeTrackId) {
 
   const title = document.createElement("div");
   title.className = "tracklistTitle";
-  title.textContent = `${album.title} — ${album.artist}`;
+  title.textContent = album.artist ? `${album.title} — ${album.artist}` : album.title;
   tracklistEl.appendChild(title);
 
   const actions = document.createElement("div");
   actions.className = "albumActions";
 
-  const playLaterBtn = document.createElement("button");
-  playLaterBtn.type = "button";
-  playLaterBtn.textContent = "Play later";
-  playLaterBtn.onclick = () => queueAlbumLater(album.id);
-  actions.appendChild(playLaterBtn);
+  if (!album.isPlayLater) {
+    const playLaterBtn = document.createElement("button");
+    playLaterBtn.type = "button";
+    playLaterBtn.textContent = "Play later";
+    playLaterBtn.onclick = () => queueAlbumLater(album.id);
+    actions.appendChild(playLaterBtn);
+  }
 
   const stopBtn = document.createElement("button");
   stopBtn.type = "button";
@@ -311,7 +341,7 @@ function renderTracklist(activeTrackId) {
 
   if (!album.tracks.length) {
     const empty = document.createElement("div");
-    empty.textContent = "No tracks in this album.";
+    empty.textContent = album.isPlayLater ? "Play later is empty." : "No tracks in this album.";
     empty.style.color = "var(--mut)";
     rows.appendChild(empty);
     return;
@@ -577,6 +607,8 @@ async function scanAndBuildLibrary(dir) {
   setStatus(`Ready: ${library.albums.length} albums. Tap an album cover to start.`);
 
   const savedState = await loadPlayerState();
+  playLaterTracks = (savedState?.playLaterTracks || []).filter(id => library.tracksById.has(id));
+
   if (savedState?.queue?.length) {
     queue = savedState.queue.filter(id => library.tracksById.has(id));
     queueIndex = Math.min(savedState.queueIndex ?? 0, Math.max(0, queue.length - 1));
@@ -604,13 +636,18 @@ async function scanAndBuildLibrary(dir) {
 
 // ===== Queue + playback =====
 function buildQueueFromAlbum(albumId) {
-  const album = library.albumsById.get(albumId);
+  const album = getAlbumById(albumId);
   if (!album) return;
   queue = [...album.tracks];
 }
 
+function getAlbumById(albumId) {
+  if (albumId === PLAY_LATER_ID) return getPlayLaterAlbum();
+  return library.albumsById.get(albumId);
+}
+
 function playAlbumNow(albumId) {
-  const album = library.albumsById.get(albumId);
+  const album = getAlbumById(albumId);
   if (!album || !album.tracks.length) {
     setStatus("This album has no tracks to play.");
     return;
@@ -626,19 +663,16 @@ function playAlbumNow(albumId) {
 }
 
 function queueAlbumLater(albumId) {
-  const album = library.albumsById.get(albumId);
+  const album = getAlbumById(albumId);
   if (!album || !album.tracks.length) {
     setStatus("This album has no tracks to add.");
     return;
   }
 
-  if (!queue.length) {
-    playAlbumNow(albumId);
-    return;
-  }
-
-  queue.push(...album.tracks);
-  setStatus(`Added ${album.tracks.length} track(s) to the queue.`);
+  playLaterTracks.push(...album.tracks);
+  setStatus(`Added ${album.tracks.length} track(s) to Play later.`);
+  renderAlbums(library.albums);
+  savePlayerState().catch(() => {});
 }
 
 function stopAndReturnToAlbums() {

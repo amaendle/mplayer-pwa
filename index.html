@@ -22,6 +22,8 @@
 
     .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:12px; }
     .tile { background:var(--card); border:1px solid var(--line); border-radius:18px; overflow:hidden; cursor:pointer; }
+    .tile.playLaterTile { outline:1px dashed var(--line); }
+    .tile.playLaterTile .cover { background:#26263a; color:#f9f9f9; font-size:28px; }
     .cover { width:100%; aspect-ratio:1/1; background:#2a2a2f; display:flex; align-items:center; justify-content:center; color:var(--mut); }
     .meta { padding:10px; }
     .album { font-weight:650; font-size:14px; margin:0 0 3px; }
