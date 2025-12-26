@@ -63,6 +63,7 @@ const bigCoverEl = document.getElementById("bigCover");
 const bigTitleEl = document.getElementById("bigTitle");
 const bigSubEl = document.getElementById("bigSub");
 const nowAlbumPreviewEl = document.getElementById("nowAlbumPreview");
+const tracklistEl = document.getElementById("tracklist");
 
 document.getElementById("btnBigPrev").onclick = prev;
 document.getElementById("btnBigPlay").onclick = playPause;
@@ -100,6 +101,8 @@ function updateNowViewUI(track) {
   bigCoverEl.innerHTML = coverUrl
     ? `<img alt="" src="${coverUrl}">`
     : `Cover`;
+
+  renderTracklist(track?.id || null);
 }
 
 // ===== Audio element (simple, reliable) =====
@@ -254,10 +257,84 @@ function renderNowAlbumPreview(albums) {
   }
 }
 
+function renderTracklist(activeTrackId) {
+  tracklistEl.innerHTML = "";
+
+  if (!currentAlbumId) {
+    tracklistEl.textContent = "No album selected yet.";
+    tracklistEl.style.color = "var(--mut)";
+    return;
+  }
+
+  const album = library.albumsById.get(currentAlbumId);
+  if (!album) {
+    tracklistEl.textContent = "Album not found.";
+    tracklistEl.style.color = "var(--mut)";
+    return;
+  }
+
+  tracklistEl.style.color = "";
+
+  const title = document.createElement("div");
+  title.className = "tracklistTitle";
+  title.textContent = `${album.title} — ${album.artist}`;
+  tracklistEl.appendChild(title);
+
+  const rows = document.createElement("div");
+  rows.className = "trackRows";
+  tracklistEl.appendChild(rows);
+
+  if (!album.tracks.length) {
+    const empty = document.createElement("div");
+    empty.textContent = "No tracks in this album.";
+    empty.style.color = "var(--mut)";
+    rows.appendChild(empty);
+    return;
+  }
+
+  album.tracks.forEach((trackId, idx) => {
+    const track = library.tracksById.get(trackId);
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "trackRow" + (trackId === activeTrackId ? " active" : "");
+    row.onclick = () => {
+      queue = [...album.tracks];
+      queueIndex = idx;
+      playCurrent().catch(e => console.warn(e));
+    };
+
+    const num = document.createElement("span");
+    num.className = "num";
+    const trackNumber = track?.trackNo || idx + 1;
+    num.textContent = trackNumber.toString().padStart(2, "0");
+    row.appendChild(num);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const titleEl = document.createElement("div");
+    titleEl.className = "title";
+    titleEl.textContent = track?.title || "Unknown title";
+    const artistEl = document.createElement("div");
+    artistEl.className = "artist";
+    artistEl.textContent = track?.artist || "Unknown artist";
+    meta.appendChild(titleEl);
+    meta.appendChild(artistEl);
+    row.appendChild(meta);
+
+    const state = document.createElement("span");
+    state.className = "state";
+    state.textContent = trackId === activeTrackId ? "▶" : "";
+    row.appendChild(state);
+
+    rows.appendChild(row);
+  });
+}
+
 function setNowPlayingUI(track) {
   if (!track) {
     nowTitleEl.textContent = "Nothing playing";
     nowSubEl.textContent = "Pick an album tile";
+    renderTracklist(null);
     return;
   }
   nowTitleEl.textContent = track.title || "Unknown title";
