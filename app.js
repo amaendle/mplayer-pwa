@@ -384,7 +384,9 @@ async function scanAndBuildLibrary(dir) {
     let albumId = albumKeyToAlbumId.get(albumKey);
 
     if (!albumId) {
-      albumId = crypto.randomUUID();
+      //albumId = crypto.randomUUID();
+      // Deterministic album ID so saved state matches after reloads
+      albumId = `album:${albumKey}`;
       albumKeyToAlbumId.set(albumKey, albumId);
 
       const coverUrl = coverUrlFromTags(tags); // might be null
@@ -405,7 +407,9 @@ async function scanAndBuildLibrary(dir) {
       }
     }
 
-    const trackId = crypto.randomUUID();
+    //const trackId = crypto.randomUUID();
+    // Deterministic track ID so saved state matches after reloads
+    const trackId = `track:${item.path}`;
     const trackObj = {
       id: trackId,
       title,
