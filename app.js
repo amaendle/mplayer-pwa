@@ -58,10 +58,62 @@ document.getElementById("btnPrev").onclick = prev;
 document.getElementById("btnPlay").onclick = playPause;
 document.getElementById("btnNext").onclick = next;
 
+const nowViewEl = document.getElementById("nowView");
+const bigCoverEl = document.getElementById("bigCover");
+const bigTitleEl = document.getElementById("bigTitle");
+const bigSubEl = document.getElementById("bigSub");
+
+document.getElementById("btnBackToAlbums").onclick = () => closeNowView();
+document.getElementById("btnOpenLibraryFromNow").onclick = () => { closeNowView(); toggleDrawer(); };
+
+document.getElementById("btnBigPrev").onclick = prev;
+document.getElementById("btnBigPlay").onclick = playPause;
+document.getElementById("btnBigNext").onclick = next;
+
+// Open big now-playing when user taps the bottom bar text area
+document.querySelector(".player .now").onclick = () => openNowView();
+
+// Add open/close + UI update
+function openNowView() {
+  nowViewEl.classList.add("open");
+  nowViewEl.setAttribute("aria-hidden", "false");
+}
+function closeNowView() {
+  nowViewEl.classList.remove("open");
+  nowViewEl.setAttribute("aria-hidden", "true");
+}
+
+function updateNowViewUI(track) {
+  bigTitleEl.textContent = track ? (track.title || "Unknown title") : "Nothing playing";
+  bigSubEl.textContent = track ? `${track.artist || "Unknown artist"} • ${track.album || "Unknown album"}` : "Pick an album";
+
+  // cover: use album cover if we have it
+  let coverUrl = null;
+  if (track && currentAlbumId) {
+    const alb = library.albumsById.get(currentAlbumId);
+    coverUrl = alb?.coverUrl || null;
+  }
+  bigCoverEl.innerHTML = coverUrl
+    ? `<img alt="" src="${coverUrl}">`
+    : `Cover`;
+}
+
 // ===== Audio element (simple, reliable) =====
 const audio = new Audio();
 audio.preload = "metadata";
 audio.addEventListener("ended", () => next(true));
+
+audio.addEventListener("timeupdate", () => {
+  // save at most every ~2s
+  const t = audio.currentTime || 0;
+  if (!audio._lastSavedAt || (t - audio._lastSavedAt) >= 2) {
+    audio._lastSavedAt = t;
+    savePlayerState().catch(()=>{});
+  }
+});
+audio.addEventListener("pause", () => savePlayerState().catch(()=>{}));
+audio.addEventListener("play", () => savePlayerState().catch(()=>{}));
+window.addEventListener("beforeunload", () => { savePlayerState(); });
 
 // ===== App state =====
 let dirHandle = null;
@@ -76,6 +128,25 @@ let queue = [];        // array of trackIds
 let queueIndex = 0;
 let isPlaying = false;
 let currentAlbumId = null;
+
+const STATE_KEY = "playerState";
+
+async function savePlayerState() {
+  const currentTrackId = queue[queueIndex] ?? null;
+  const state = {
+    currentAlbumId,
+    queue,
+    queueIndex,
+    currentTrackId,
+    position: audio.currentTime || 0,
+    wasPlaying: !audio.paused
+  };
+  await idbSet(STATE_KEY, state);
+}
+
+async function loadPlayerState() {
+  return await idbGet(STATE_KEY);
+}
 
 // ===== Small helpers =====
 function escapeHtml(s) {
@@ -108,17 +179,35 @@ function renderAlbums(albums) {
     const tile = document.createElement("div");
     tile.className = "tile";
 
+    // obvious tap to play overlay:
     const cover = a.coverUrl
       ? `<img alt="" src="${a.coverUrl}" style="width:100%;height:100%;object-fit:cover;display:block;">`
       : `<div class="cover">No cover</div>`;
-
+    
     tile.innerHTML = `
-      <div class="cover" style="padding:0;">${cover}</div>
+      <div class="cover" style="padding:0; position:relative;">
+        ${cover}
+        <div class="playOverlay">
+          <div class="playBtn">▶</div>
+        </div>
+      </div>
       <div class="meta">
         <p class="album">${escapeHtml(a.title)}</p>
         <p class="artist">${escapeHtml(a.artist)}</p>
       </div>
     `;
+    // standard without overlay
+    //const cover = a.coverUrl
+    //  ? `<img alt="" src="${a.coverUrl}" style="width:100%;height:100%;object-fit:cover;display:block;">`
+    //  : `<div class="cover">No cover</div>`;
+
+    //tile.innerHTML = `
+    //  <div class="cover" style="padding:0;">${cover}</div>
+    //  <div class="meta">
+    //    <p class="album">${escapeHtml(a.title)}</p>
+    //    <p class="artist">${escapeHtml(a.artist)}</p>
+    //  </div>
+    //`;
 
     tile.onclick = () => {
       currentAlbumId = a.id;
@@ -142,6 +231,8 @@ function setNowPlayingUI(track) {
   }
   nowTitleEl.textContent = track.title || "Unknown title";
   nowSubEl.textContent = `${track.artist || "Unknown artist"} • ${track.album || "Unknown album"}`;
+
+  updateNowViewUI(track);
 }
 
 // ===== Folder connect / persist across reloads =====
@@ -346,6 +437,31 @@ async function scanAndBuildLibrary(dir) {
   renderAlbums(library.albums);
   libInfoEl.textContent = `Connected. ${library.albums.length} albums found. Tap an album cover to play.`;
   setStatus(`Ready: ${library.albums.length} albums. Tap an album cover to start.`);
+
+  const savedState = await loadPlayerState();
+  if (savedState?.queue?.length) {
+    queue = savedState.queue.filter(id => library.tracksById.has(id));
+    queueIndex = Math.min(savedState.queueIndex ?? 0, Math.max(0, queue.length - 1));
+    currentAlbumId = savedState.currentAlbumId ?? null;
+  
+    // Update UI to show last track even before playing
+    const tid = queue[queueIndex];
+    if (tid) {
+      const tr = library.tracksById.get(tid);
+      setNowPlayingUI(tr);
+      updateNowViewUI(tr); // (we’ll add this function below)
+    }
+  
+    // Optional: auto-resume (you said “yes”)
+    // We will try to resume; if browser blocks autoplay, user can press Play.
+    try {
+      await playCurrent();
+      audio.currentTime = Math.max(0, savedState.position || 0);
+      if (!savedState.wasPlaying) audio.pause();
+    } catch {
+      // Autoplay blocked or file access prompt; user can press play
+    }
+  }
 }
 
 // ===== Queue + playback =====
