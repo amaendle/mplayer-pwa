@@ -62,13 +62,15 @@ const nowViewEl = document.getElementById("nowView");
 const bigCoverEl = document.getElementById("bigCover");
 const bigTitleEl = document.getElementById("bigTitle");
 const bigSubEl = document.getElementById("bigSub");
+const nowAlbumPreviewEl = document.getElementById("nowAlbumPreview");
 
-document.getElementById("btnBackToAlbums").onclick = () => closeNowView();
+document.getElementById("btnBackToAlbums").onclick = () => goToAlbumsView();
 document.getElementById("btnOpenLibraryFromNow").onclick = () => { closeNowView(); toggleDrawer(); };
 
 document.getElementById("btnBigPrev").onclick = prev;
 document.getElementById("btnBigPlay").onclick = playPause;
 document.getElementById("btnBigNext").onclick = next;
+nowAlbumPreviewEl.onclick = () => goToAlbumsView();
 
 // Open big now-playing when user taps the bottom bar text area
 document.querySelector(".player .now").onclick = () => openNowView();
@@ -81,6 +83,11 @@ function openNowView() {
 function closeNowView() {
   nowViewEl.classList.remove("open");
   nowViewEl.setAttribute("aria-hidden", "true");
+}
+
+function goToAlbumsView() {
+  closeNowView();
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function updateNowViewUI(track) {
@@ -172,6 +179,7 @@ function renderAlbums(albums) {
 
   if (!albums.length) {
     gridEl.innerHTML = `<div style="color:#a7a7a7;">No albums yet. Connect a folder with MP3 files.</div>`;
+    renderNowAlbumPreview(albums);
     return;
   }
 
@@ -220,6 +228,29 @@ function renderAlbums(albums) {
     };
 
     gridEl.appendChild(tile);
+  }
+
+  renderNowAlbumPreview(albums);
+}
+
+function renderNowAlbumPreview(albums) {
+  nowAlbumPreviewEl.innerHTML = "";
+
+  if (!albums.length) {
+    nowAlbumPreviewEl.textContent = "No albums yet";
+    nowAlbumPreviewEl.style.color = "var(--mut)";
+    return;
+  }
+
+  nowAlbumPreviewEl.style.color = "";
+
+  for (const a of albums) {
+    const thumb = document.createElement("div");
+    thumb.className = "thumb";
+    thumb.innerHTML = a.coverUrl
+      ? `<img alt="" src="${a.coverUrl}">`
+      : "♪";
+    nowAlbumPreviewEl.appendChild(thumb);
   }
 }
 
