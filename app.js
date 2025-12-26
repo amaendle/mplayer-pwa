@@ -136,6 +136,9 @@ let queueIndex = 0;
 let isPlaying = false;
 let currentAlbumId = null;
 
+let playLaterTracks = [];
+const PLAY_LATER_ID = "__play_later__";
+
 const STATE_KEY = "playerState";
 
 async function savePlayerState() {
@@ -146,7 +149,8 @@ async function savePlayerState() {
     queueIndex,
     currentTrackId,
     position: audio.currentTime || 0,
-    wasPlaying: !audio.paused
+    wasPlaying: !audio.paused,
+    playLaterTracks,
   };
   await idbSet(STATE_KEY, state);
 }
@@ -160,6 +164,44 @@ function escapeHtml(s) {
   return (s ?? "").replace(/[&<>"']/g, c => ({
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   })[c]);
+}
+
+function prunePlayLaterTracks() {
+  const filtered = playLaterTracks.filter(id => library.tracksById.has(id));
+  if (filtered.length !== playLaterTracks.length) playLaterTracks = filtered;
+}
+
+function getPlayLaterAlbum() {
+  prunePlayLaterTracks();
+  const count = playLaterTracks.length;
+  return {
+    id: PLAY_LATER_ID,
+    title: "Play later",
+    artist: count ? `${count} track${count === 1 ? "" : "s"}` : "Empty",
+    coverUrl: null,
+    tracks: [...playLaterTracks],
+    isPlayLater: true,
+  };
+}
+
+function clearPlayLater() {
+  const wasViewingPlayLater = currentAlbumId === PLAY_LATER_ID;
+
+  playLaterTracks = [];
+
+  if (wasViewingPlayLater) {
+    audio.pause();
+    isPlaying = false;
+    queue = [];
+    queueIndex = 0;
+    currentAlbumId = null;
+    setNowPlayingUI(null);
+  }
+
+  renderAlbums(library.albums);
+  renderTracklist(wasViewingPlayLater ? null : queue[queueIndex] ?? null);
+  setStatus("Cleared Play later list.");
+  savePlayerState().catch(() => {});
 }
 
 function setStatus(msg) { statusEl.textContent = msg; }
@@ -177,13 +219,15 @@ function closeDrawer() {
 function renderAlbums(albums) {
   gridEl.innerHTML = "";
 
-  if (!albums.length) {
+  const displayAlbums = [getPlayLaterAlbum(), ...albums];
+
+  if (!albums.length && playLaterTracks.length === 0) {
     gridEl.innerHTML = `<div style="color:#a7a7a7;">No albums yet. Connect a folder with MP3 files.</div>`;
-    renderNowAlbumPreview(albums);
+    renderNowAlbumPreview(displayAlbums);
     return;
   }
 
-  for (const a of albums) {
+  for (const a of displayAlbums) {
     const tile = document.createElement("div");
     tile.className = "tile";
 
@@ -233,13 +277,13 @@ function renderAlbums(albums) {
     gridEl.appendChild(tile);
   }
 
-  renderNowAlbumPreview(albums);
+  renderNowAlbumPreview(displayAlbums);
 }
 
 function renderNowAlbumPreview(albums) {
   nowAlbumPreviewEl.innerHTML = "";
 
-  if (!albums.length) {
+  if (!albums.length || (albums.length === 1 && albums[0].id === PLAY_LATER_ID && playLaterTracks.length === 0)) {
     nowAlbumPreviewEl.textContent = "No albums yet";
     nowAlbumPreviewEl.style.color = "var(--mut)";
     return;
@@ -266,7 +310,9 @@ function renderTracklist(activeTrackId) {
     return;
   }
 
-  const album = library.albumsById.get(currentAlbumId);
+  const album = currentAlbumId === PLAY_LATER_ID
+    ? getPlayLaterAlbum()
+    : library.albumsById.get(currentAlbumId);
   if (!album) {
     tracklistEl.textContent = "Album not found.";
     tracklistEl.style.color = "var(--mut)";
@@ -280,13 +326,30 @@ function renderTracklist(activeTrackId) {
   title.textContent = `${album.title} — ${album.artist}`;
   tracklistEl.appendChild(title);
 
+  const albumActions = document.createElement("div");
+  albumActions.className = "albumActions";
+  const stopBtn = document.createElement("button");
+  stopBtn.type = "button";
+  stopBtn.textContent = "Stop / Eject";
+  stopBtn.onclick = stopPlayback;
+  albumActions.appendChild(stopBtn);
+
+  if (album.isPlayLater) {
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Clear Play later";
+    clearBtn.onclick = clearPlayLater;
+    albumActions.appendChild(clearBtn);
+  }
+  tracklistEl.appendChild(albumActions);
+
   const rows = document.createElement("div");
   rows.className = "trackRows";
   tracklistEl.appendChild(rows);
 
   if (!album.tracks.length) {
     const empty = document.createElement("div");
-    empty.textContent = "No tracks in this album.";
+    empty.textContent = album.isPlayLater ? "No tracks saved for later." : "No tracks in this album.";
     empty.style.color = "var(--mut)";
     rows.appendChild(empty);
     return;
@@ -546,11 +609,15 @@ async function scanAndBuildLibrary(dir) {
     })
     .sort((a, b) => (a.artist + " " + a.title).localeCompare(b.artist + " " + b.title));
 
+  const savedState = await loadPlayerState();
+  if (savedState?.playLaterTracks?.length) {
+    playLaterTracks = savedState.playLaterTracks.filter(id => library.tracksById.has(id));
+  }
+
   renderAlbums(library.albums);
   libInfoEl.textContent = `Connected. ${library.albums.length} albums found. Tap an album cover to play.`;
   setStatus(`Ready: ${library.albums.length} albums. Tap an album cover to start.`);
 
-  const savedState = await loadPlayerState();
   if (savedState?.queue?.length) {
     queue = savedState.queue.filter(id => library.tracksById.has(id));
     queueIndex = Math.min(savedState.queueIndex ?? 0, Math.max(0, queue.length - 1));
@@ -578,6 +645,11 @@ async function scanAndBuildLibrary(dir) {
 
 // ===== Queue + playback =====
 function buildQueueFromAlbum(albumId) {
+  if (albumId === PLAY_LATER_ID) {
+    queue = [...getPlayLaterAlbum().tracks];
+    return;
+  }
+
   const album = library.albumsById.get(albumId);
   if (!album) return;
   queue = [...album.tracks];
@@ -631,6 +703,20 @@ function playPause() {
     isPlaying = false;
     setStatus("⏸ Paused");
   }
+}
+
+function stopPlayback() {
+  if (audio.src) {
+    audio.pause();
+    try { audio.currentTime = 0; } catch {}
+  }
+  isPlaying = false;
+  queue = [];
+  queueIndex = 0;
+  currentAlbumId = null;
+  setNowPlayingUI(null);
+  setStatus("⏹ Stopped.");
+  savePlayerState().catch(() => {});
 }
 
 function prev() {
