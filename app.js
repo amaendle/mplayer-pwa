@@ -338,6 +338,14 @@ function renderTracklist(activeTrackId) {
     actions.appendChild(playLaterBtn);
   }
 
+  if (album.isPlayLater) {
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Clear Play later";
+    clearBtn.onclick = clearPlayLater;
+    actions.appendChild(clearBtn);
+  }
+
   const stopBtn = document.createElement("button");
   stopBtn.type = "button";
   stopBtn.textContent = "Stop / eject";
@@ -704,6 +712,22 @@ function queueAlbumLater(albumId) {
   playLaterTracks.push(...album.tracks);
   setStatus(`Added ${album.tracks.length} track(s) to Play later.`);
   renderAlbums(library.albums);
+  savePlayerState().catch(() => {});
+}
+
+function clearPlayLater() {
+  if (!playLaterTracks.length) {
+    setStatus("Play later is already empty.");
+    return;
+  }
+
+  playLaterTracks = [];
+  setStatus("Play later cleared.");
+  renderAlbums(library.albums);
+  if (currentAlbumId === PLAY_LATER_ID) {
+    const activeTrackId = queue[queueIndex] ?? null;
+    renderTracklist(activeTrackId);
+  }
   savePlayerState().catch(() => {});
 }
 
