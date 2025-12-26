@@ -327,11 +327,6 @@ function renderTracklist(activeTrackId) {
 
   tracklistEl.style.color = "";
 
-  const title = document.createElement("div");
-  title.className = "tracklistTitle";
-  title.textContent = album.artist ? `${album.title} — ${album.artist}` : album.title;
-  tracklistEl.appendChild(title);
-
   const actions = document.createElement("div");
   actions.className = "albumActions";
 
