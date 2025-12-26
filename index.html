@@ -60,17 +60,74 @@
       background:var(--card); color:var(--fg); border:1px solid var(--line);
       cursor:pointer; font-size:16px;
     }
+
+    /* Album tile play overlay */
+    .tile { position: relative; }
+    .playOverlay {
+      position:absolute; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      background: linear-gradient(to top, rgba(0,0,0,.65), rgba(0,0,0,.15));
+      opacity:0; transition: opacity .12s ease;
+    }
+    .tile:active .playOverlay, .tile:hover .playOverlay { opacity:1; }
+    .playBtn {
+      width:64px; height:64px; border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(25,25,27,.92);
+      display:flex; align-items:center; justify-content:center;
+      font-size:26px;
+    }
+    
+    /* Fullscreen Now Playing */
+    .nowView {
+      position:fixed; inset:0; z-index:6;
+      background:var(--bg);
+      display:none;
+      padding:16px 16px 96px;
+    }
+    .nowView.open { display:block; }
+    .nowTop { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .nowTop button {
+      background:var(--card); color:var(--fg); border:1px solid var(--line);
+      padding:10px 12px; border-radius:14px; cursor:pointer;
+    }
+    .bigCover {
+      margin-top:14px;
+      width:min(420px, 92vw);
+      aspect-ratio:1/1;
+      border-radius:22px;
+      overflow:hidden;
+      border:1px solid var(--line);
+      background:#2a2a2f;
+      display:flex; align-items:center; justify-content:center;
+    }
+    .bigCover img { width:100%; height:100%; object-fit:cover; display:block; }
+    
+    .bigTitle { margin:14px 0 4px; font-size:20px; font-weight:750; }
+    .bigSub { margin:0 0 16px; color:var(--mut); }
+    
+    .bigControls { display:flex; gap:10px; }
+    .bigControls button {
+      flex:1;
+      height:64px;
+      border-radius:18px;
+      background:var(--card);
+      color:var(--fg);
+      border:1px solid var(--line);
+      font-size:22px;
+      cursor:pointer;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>MP3 Tiles Player</h1>
     <button id="btnLibrary">Library</button>
-    <button id="btnConnect">Connect Folder</button>
+    <button id="btnConnect">Add Music</button>
   </header>
 
   <div class="wrap">
-    <div class="status" id="status">Not connected. Click “Connect Folder”.</div>
+    <div class="status" id="status">Click “Add Music” to add music to the library.</div>
     <div class="grid" id="grid"></div>
   </div>
 
@@ -81,6 +138,25 @@
       <div class="small" id="libInfo">No folder connected yet.</div>
       <button id="btnReconnect">Reconnect / Request Permission</button>
       <button id="btnCloseDrawer">Close</button>
+    </div>
+  </div>
+
+  <!-- Fullscreen Now Playing -->
+  <div class="nowView" id="nowView" aria-hidden="true">
+    <div class="nowTop">
+      <button id="btnBackToAlbums">Albums</button>
+      <button id="btnOpenLibraryFromNow">Library</button>
+    </div>
+  
+    <div class="bigCover" id="bigCover">Cover</div>
+  
+    <div class="bigTitle" id="bigTitle">Nothing playing</div>
+    <div class="bigSub" id="bigSub">Pick an album</div>
+  
+    <div class="bigControls">
+      <button id="btnBigPrev">⏮</button>
+      <button id="btnBigPlay">⏯</button>
+      <button id="btnBigNext">⏭</button>
     </div>
   </div>
 
