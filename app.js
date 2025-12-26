@@ -53,6 +53,7 @@ drawerEl.addEventListener("click", (e) => { if (e.target === drawerEl) closeDraw
 
 document.getElementById("btnConnect").onclick = connectFolder;
 document.getElementById("btnReconnect").onclick = reconnectFolder;
+document.getElementById("btnClearLibrary").onclick = clearLibrary;
 
 document.getElementById("btnPrev").onclick = prev;
 document.getElementById("btnPlay").onclick = playPause;
@@ -123,7 +124,9 @@ audio.addEventListener("play", () => savePlayerState().catch(()=>{}));
 window.addEventListener("beforeunload", () => { savePlayerState(); });
 
 // ===== App state =====
-let dirHandle = null;
+let dirHandles = [];
+
+const MUSIC_DIRS_KEY = "musicDirs";
 
 let library = {
   albums: [],            // [{id,title,artist,coverUrl,tracks:[trackIds]}]
@@ -175,6 +178,19 @@ function toggleDrawer() {
 function closeDrawer() {
   drawerEl.classList.remove("open");
   drawerEl.setAttribute("aria-hidden", "true");
+}
+
+async function loadSavedDirectories() {
+  const list = await idbGet(MUSIC_DIRS_KEY);
+  if (Array.isArray(list)) return list;
+
+  // Legacy single-folder key
+  const legacy = await idbGet("musicDir");
+  return legacy ? [legacy] : [];
+}
+
+async function persistDirectories(handles) {
+  await idbSet(MUSIC_DIRS_KEY, handles);
 }
 
 // ===== Rendering =====
@@ -405,12 +421,21 @@ async function connectFolder() {
     return;
   }
   try {
-    dirHandle = await window.showDirectoryPicker();
-    await idbSet("musicDir", dirHandle);
+    const handle = await window.showDirectoryPicker();
+    const saved = await loadSavedDirectories();
+    const granted = [];
+    for (const h of saved) {
+      let perm = await h.queryPermission({ mode: "read" });
+      if (perm !== "granted") perm = await h.requestPermission({ mode: "read" });
+      if (perm === "granted") granted.push(h);
+    }
+
+    dirHandles = [...granted, handle];
+    await persistDirectories([...saved, handle]);
     await idbSet("musicDirConnectedAt", Date.now());
-    libInfoEl.textContent = "Folder connected (saved). Scanning…";
-    setStatus("Folder connected. Scanning music…");
-    await scanAndBuildLibrary(dirHandle);
+    libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
+    setStatus("Folder added. Scanning music…");
+    await scanAndBuildLibraryFromDirs(dirHandles);
   } catch (e) {
     console.warn(e);
     setStatus("Folder connect canceled or failed.");
@@ -418,27 +443,32 @@ async function connectFolder() {
 }
 
 async function reconnectFolder() {
-  const saved = await idbGet("musicDir");
-  if (!saved) {
-    setStatus("No saved folder yet. Click “Connect Folder”.");
+  const saved = await loadSavedDirectories();
+  if (!saved.length) {
+    setStatus("No saved folders yet. Click “Add Music”.");
     return;
   }
   try {
-    let perm = await saved.queryPermission({ mode: "read" });
-    if (perm !== "granted") perm = await saved.requestPermission({ mode: "read" });
+    const granted = [];
+    for (const handle of saved) {
+      let perm = await handle.queryPermission({ mode: "read" });
+      if (perm !== "granted") perm = await handle.requestPermission({ mode: "read" });
+      if (perm === "granted") granted.push(handle);
+    }
 
-    if (perm === "granted") {
-      dirHandle = saved;
-      libInfoEl.textContent = "Reconnected. Scanning…";
-      setStatus("Reconnected to saved folder. Scanning music…");
-      await scanAndBuildLibrary(dirHandle);
+    if (granted.length) {
+      dirHandles = granted;
+      await persistDirectories(saved);
+      libInfoEl.textContent = `Reconnected ${dirHandles.length} folder(s). Scanning…`;
+      setStatus("Reconnected to saved folders. Scanning music…");
+      await scanAndBuildLibraryFromDirs(dirHandles);
     } else {
-      libInfoEl.textContent = "Saved folder exists, but permission not granted.";
-      setStatus("Permission not granted. Tap “Connect Folder” to pick it again.");
+      libInfoEl.textContent = "Saved folders exist, but permission not granted.";
+      setStatus("Permission not granted. Tap “Add Music” to pick them again.");
     }
   } catch (e) {
     console.warn(e);
-    setStatus("Could not reconnect. Tap “Connect Folder” to pick the folder again.");
+    setStatus("Could not reconnect. Tap “Add Music” to pick folders again.");
   }
 }
 
@@ -485,7 +515,7 @@ function normalizeText(s, fallback) {
 }
 
 // ===== Build library =====
-async function scanAndBuildLibrary(dir) {
+async function scanAndBuildLibraryFromDirs(dirs) {
   // Reset in-memory library (simple MVP). Later we’ll persist metadata + covers.
   library = {
     albums: [],
@@ -503,88 +533,95 @@ async function scanAndBuildLibrary(dir) {
   let mp3Count = 0;
   let readCount = 0;
 
-  // First pass: count MP3s quickly for nicer progress
-  for await (const item of walkDirectory(dir)) {
-    if (isMp3Name(item.path)) mp3Count++;
+  // First pass: count MP3s quickly for nicer progress across all folders
+  for (const dir of dirs) {
+    for await (const item of walkDirectory(dir)) {
+      if (isMp3Name(item.path)) mp3Count++;
+    }
   }
+
   if (mp3Count === 0) {
-    setStatus("No MP3 files found in this folder (or subfolders).");
+    setStatus("No MP3 files found in connected folders.");
     libInfoEl.textContent = "Connected, but no MP3s found.";
     renderAlbums([]);
     return;
   }
 
-  setStatus(`Found ${mp3Count} MP3 files. Reading tags…`);
+  setStatus(`Found ${mp3Count} MP3 files across ${dirs.length} folder(s). Reading tags…`);
 
   // Second pass: read tags + build albums
-  for await (const item of walkDirectory(dir)) {
-    if (!isMp3Name(item.path)) continue;
+  for (const [dirIdx, dir] of dirs.entries()) {
+    const pathPrefix = dirs.length > 1 ? `dir${dirIdx}:` : "";
 
-    readCount++;
-    if (readCount % 5 === 0 || readCount === mp3Count) {
-      setStatus(`Reading music… ${readCount}/${mp3Count}`);
-    }
+    for await (const item of walkDirectory(dir)) {
+      if (!isMp3Name(item.path)) continue;
 
-    let file;
-    try {
-      file = await item.fileHandle.getFile();
-    } catch (e) {
-      console.warn("Could not open file:", item.path, e);
-      continue;
-    }
-
-    const tagRes = await readTagsFromFile(file);
-    const tags = tagRes.ok ? tagRes.tags : {};
-
-    const album = normalizeText(tags?.album, "Unknown album");
-    const artist = normalizeText(tags?.artist, "Unknown artist");
-    const title = normalizeText(tags?.title, file.name.replace(/\.mp3$/i, ""));
-    const trackNoRaw = tags?.track; // can be "3/12" or number
-    const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
-    const safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
-
-    const albumKey = `${artist}|||${album}`;
-    let albumId = albumKeyToAlbumId.get(albumKey);
-
-    if (!albumId) {
-      //albumId = crypto.randomUUID();
-      // Deterministic album ID so saved state matches after reloads
-      albumId = `album:${albumKey}`;
-      albumKeyToAlbumId.set(albumKey, albumId);
-
-      const coverUrl = coverUrlFromTags(tags); // might be null
-      const albumObj = {
-        id: albumId,
-        title: album,
-        artist,
-        coverUrl,
-        tracks: [],
-      };
-      library.albumsById.set(albumId, albumObj);
-    } else {
-      // If album exists but has no cover yet, try to set it from this track
-      const a = library.albumsById.get(albumId);
-      if (a && !a.coverUrl) {
-        const cu = coverUrlFromTags(tags);
-        if (cu) a.coverUrl = cu;
+      readCount++;
+      if (readCount % 5 === 0 || readCount === mp3Count) {
+        setStatus(`Reading music… ${readCount}/${mp3Count}`);
       }
+
+      let file;
+      try {
+        file = await item.fileHandle.getFile();
+      } catch (e) {
+        console.warn("Could not open file:", item.path, e);
+        continue;
+      }
+
+      const tagRes = await readTagsFromFile(file);
+      const tags = tagRes.ok ? tagRes.tags : {};
+
+      const album = normalizeText(tags?.album, "Unknown album");
+      const artist = normalizeText(tags?.artist, "Unknown artist");
+      const title = normalizeText(tags?.title, file.name.replace(/\.mp3$/i, ""));
+      const trackNoRaw = tags?.track; // can be "3/12" or number
+      const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
+      const safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
+
+      const albumKey = `${artist}|||${album}`;
+      let albumId = albumKeyToAlbumId.get(albumKey);
+
+      if (!albumId) {
+        //albumId = crypto.randomUUID();
+        // Deterministic album ID so saved state matches after reloads
+        albumId = `album:${albumKey}`;
+        albumKeyToAlbumId.set(albumKey, albumId);
+
+        const coverUrl = coverUrlFromTags(tags); // might be null
+        const albumObj = {
+          id: albumId,
+          title: album,
+          artist,
+          coverUrl,
+          tracks: [],
+        };
+        library.albumsById.set(albumId, albumObj);
+      } else {
+        // If album exists but has no cover yet, try to set it from this track
+        const a = library.albumsById.get(albumId);
+        if (a && !a.coverUrl) {
+          const cu = coverUrlFromTags(tags);
+          if (cu) a.coverUrl = cu;
+        }
+      }
+
+      //const trackId = crypto.randomUUID();
+      // Deterministic track ID so saved state matches after reloads
+      const trackId = `track:${pathPrefix}${item.path}`;
+      const trackObj = {
+        id: trackId,
+        title,
+        artist,
+        album,
+        albumId,
+        trackNo: safeTrackNo,
+        fileHandle: item.fileHandle,
+      };
+
+      library.tracksById.set(trackId, trackObj);
+      library.albumsById.get(albumId).tracks.push(trackId);
     }
-
-    //const trackId = crypto.randomUUID();
-    // Deterministic track ID so saved state matches after reloads
-    const trackId = `track:${item.path}`;
-    const trackObj = {
-      id: trackId,
-      title,
-      artist,
-      album,
-      albumId,
-      trackNo: safeTrackNo,
-      fileHandle: item.fileHandle,
-    };
-
-    library.tracksById.set(trackId, trackObj);
-    library.albumsById.get(albumId).tracks.push(trackId);
   }
 
   // Finalize albums list and sort
@@ -603,8 +640,8 @@ async function scanAndBuildLibrary(dir) {
     .sort((a, b) => (a.artist + " " + a.title).localeCompare(b.artist + " " + b.title));
 
   renderAlbums(library.albums);
-  libInfoEl.textContent = `Connected. ${library.albums.length} albums found. Tap an album cover to play.`;
-  setStatus(`Ready: ${library.albums.length} albums. Tap an album cover to start.`);
+  libInfoEl.textContent = `Connected to ${dirs.length} folder(s). ${library.albums.length} albums found. Tap an album cover to play.`;
+  setStatus(`Ready: ${library.albums.length} albums across ${dirs.length} folder(s). Tap an album cover to start.`);
 
   const savedState = await loadPlayerState();
   playLaterTracks = (savedState?.playLaterTracks || []).filter(id => library.tracksById.has(id));
@@ -672,6 +709,32 @@ function queueAlbumLater(albumId) {
   playLaterTracks.push(...album.tracks);
   setStatus(`Added ${album.tracks.length} track(s) to Play later.`);
   renderAlbums(library.albums);
+  savePlayerState().catch(() => {});
+}
+
+async function clearLibrary() {
+  dirHandles = [];
+  await persistDirectories([]);
+
+  audio.pause();
+  audio.currentTime = 0;
+  isPlaying = false;
+  queue = [];
+  queueIndex = 0;
+  currentAlbumId = null;
+  playLaterTracks = [];
+
+  library = {
+    albums: [],
+    tracksById: new Map(),
+    albumsById: new Map(),
+  };
+
+  renderAlbums([]);
+  setNowPlayingUI(null);
+  goToAlbumsView();
+  libInfoEl.textContent = "No folder connected yet. Tap “Add Music”.";
+  setStatus("Library cleared. Use Add Music to connect folders again.");
   savePlayerState().catch(() => {});
 }
 
@@ -758,12 +821,13 @@ function next(fromEnded = false) {
   setNowPlayingUI(null);
 
   // Auto-try reconnect on startup
-  const saved = await idbGet("musicDir");
-  if (saved) {
-    libInfoEl.textContent = "Saved folder found. Reconnecting…";
+  const saved = await loadSavedDirectories();
+  if (saved.length) {
+    dirHandles = saved;
+    libInfoEl.textContent = "Saved folder(s) found. Reconnecting…";
     await reconnectFolder();
   } else {
-    libInfoEl.textContent = "No folder connected yet. Tap “Connect Folder”.";
-    setStatus("Not connected. Tap “Connect Folder”.");
+    libInfoEl.textContent = "No folder connected yet. Tap “Add Music”.";
+    setStatus("Not connected. Tap “Add Music”.");
   }
 })();
