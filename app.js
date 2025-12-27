@@ -45,6 +45,8 @@ const nowSubEl = document.getElementById("nowSub");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
+const rebuildModeDescEl = document.getElementById("rebuildModeDesc");
+const rebuildModeButton = document.getElementById("btnToggleRebuildMode");
 
 document.getElementById("btnLibrary").onclick = toggleDrawer;
 document.getElementById("btnToggleLibrary").onclick = toggleDrawer;
@@ -54,6 +56,7 @@ drawerEl.addEventListener("click", (e) => { if (e.target === drawerEl) closeDraw
 document.getElementById("btnConnect").onclick = connectFolder;
 document.getElementById("btnReconnect").onclick = reconnectFolder;
 document.getElementById("btnClearLibrary").onclick = clearLibrary;
+document.getElementById("btnToggleRebuildMode").onclick = toggleRebuildMode;
 
 document.getElementById("btnPrev").onclick = prev;
 document.getElementById("btnPlay").onclick = playPause;
@@ -143,6 +146,10 @@ let isPlaying = false;
 let currentAlbumId = null;
 
 const STATE_KEY = "playerState";
+const SETTINGS_KEY = "settings";
+const LIBRARY_CACHE_KEY = "libraryCacheV1";
+
+let fastRebuildEnabled = true;
 
 async function savePlayerState() {
   const currentTrackId = queue[queueIndex] ?? null;
@@ -153,13 +160,48 @@ async function savePlayerState() {
     currentTrackId,
     position: audio.currentTime || 0,
     wasPlaying: !audio.paused,
-    playLaterTracks,
+    playLaterTracks: playLaterTracks.map(id => {
+      const track = library.tracksById.get(id);
+      const path = track?.path || trackIdToPath(id);
+      return {
+        id,
+        title: track?.title ?? null,
+        artist: track?.artist ?? null,
+        album: track?.album ?? null,
+        path: path ?? null,
+      };
+    }),
   };
   await idbSet(STATE_KEY, state);
 }
 
 async function loadPlayerState() {
   return await idbGet(STATE_KEY);
+}
+
+async function loadSettings() {
+  const saved = await idbGet(SETTINGS_KEY);
+  if (saved && typeof saved.fastRebuildEnabled === "boolean") {
+    fastRebuildEnabled = saved.fastRebuildEnabled;
+  }
+  updateRebuildModeUI();
+}
+
+async function persistSettings() {
+  await idbSet(SETTINGS_KEY, { fastRebuildEnabled });
+}
+
+async function loadLibraryCache() {
+  const cache = await idbGet(LIBRARY_CACHE_KEY);
+  if (!cache) return { tracks: [], coversByAlbumKey: {} };
+  return {
+    tracks: Array.isArray(cache.tracks) ? cache.tracks : [],
+    coversByAlbumKey: cache.coversByAlbumKey || {},
+  };
+}
+
+async function persistLibraryCache(cache) {
+  await idbSet(LIBRARY_CACHE_KEY, cache);
 }
 
 // ===== Small helpers =====
@@ -170,6 +212,41 @@ function escapeHtml(s) {
 }
 
 function setStatus(msg) { statusEl.textContent = msg; }
+
+function updateRebuildModeUI() {
+  if (!rebuildModeButton) return;
+  rebuildModeButton.textContent = fastRebuildEnabled ? "Fast" : "Full check";
+  rebuildModeDescEl.textContent = fastRebuildEnabled
+    ? "Fast rebuild (default) uses cached tags and only scans new files."
+    : "Full check re-reads every file, tags, and cover.";
+}
+
+function toggleRebuildMode() {
+  fastRebuildEnabled = !fastRebuildEnabled;
+  updateRebuildModeUI();
+  persistSettings().catch(() => {});
+  setStatus(fastRebuildEnabled
+    ? "Fast rebuild enabled (uses saved tags where possible)."
+    : "Full rebuild enabled (re-reads all files).");
+}
+
+function trackIdToPath(trackId) {
+  if (!trackId?.startsWith("track:")) return null;
+  return trackId.slice("track:".length);
+}
+
+function normalizeTrackPath(path) {
+  if (!path) return null;
+  return path.replace(/^dir\d+:/, "");
+}
+
+function metadataKeyForTrack({ title, artist, album }) {
+  const t = (title ?? "").toString().trim().toLowerCase();
+  const ar = (artist ?? "").toString().trim().toLowerCase();
+  const al = (album ?? "").toString().trim().toLowerCase();
+  if (!t && !ar && !al) return null;
+  return `${t}|||${ar}|||${al}`;
+}
 
 function toggleDrawer() {
   drawerEl.classList.toggle("open");
@@ -561,6 +638,15 @@ function coverUrlFromTags(tags) {
   return URL.createObjectURL(blob);
 }
 
+function coverDataUrlFromTags(tags) {
+  const pic = tags?.picture;
+  if (!pic?.data?.length) return null;
+  const mime = pic.format || "image/jpeg";
+  let binary = "";
+  for (const b of pic.data) binary += String.fromCharCode(b);
+  return `data:${mime};base64,${btoa(binary)}`;
+}
+
 function normalizeText(s, fallback) {
   s = (s ?? "").toString().trim();
   return s.length ? s : fallback;
@@ -581,9 +667,18 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   // We don’t store the old list here in MVP, so nothing to revoke.
 
   const albumKeyToAlbumId = new Map();
+  const cacheTracks = [];
+
+  const { tracks: cachedTracks, coversByAlbumKey: cachedCovers } = fastRebuildEnabled
+    ? await loadLibraryCache()
+    : { tracks: [], coversByAlbumKey: {} };
+  const cachedByPath = new Map(cachedTracks.map(t => [t.path, t]));
+  const coversByAlbumKey = { ...cachedCovers };
+  const canUseCache = fastRebuildEnabled && cachedByPath.size > 0;
 
   let mp3Count = 0;
   let readCount = 0;
+  let processedCount = 0;
 
   // First pass: count MP3s quickly for nicer progress across all folders
   for (const dir of dirs) {
@@ -599,7 +694,13 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     return;
   }
 
-  setStatus(`Found ${mp3Count} MP3 files across ${dirs.length} folder(s). Reading tags…`);
+  if (canUseCache) {
+    setStatus(`Fast rebuild: restoring saved tags for ${mp3Count} track(s). New files will be fully scanned.`);
+  } else if (fastRebuildEnabled) {
+    setStatus(`Fast rebuild was selected, but no saved tags exist yet. Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
+  } else {
+    setStatus(`Found ${mp3Count} MP3 files across ${dirs.length} folder(s). Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
+  }
 
   // Second pass: read tags + build albums
   for (const [dirIdx, dir] of dirs.entries()) {
@@ -608,61 +709,84 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     for await (const item of walkDirectory(dir)) {
       if (!isMp3Name(item.path)) continue;
 
-      readCount++;
-      if (readCount % 5 === 0 || readCount === mp3Count) {
-        setStatus(`Reading music… ${readCount}/${mp3Count}`);
+      processedCount++;
+      const fullPath = `${pathPrefix}${item.path}`;
+      const cached = canUseCache ? cachedByPath.get(fullPath) : null;
+
+      if (canUseCache && cached && (processedCount % 10 === 0 || processedCount === mp3Count)) {
+        setStatus(`Fast rebuild: restored ${processedCount}/${mp3Count} from saved tags…`);
       }
 
-      let file;
-      try {
-        file = await item.fileHandle.getFile();
-      } catch (e) {
-        console.warn("Could not open file:", item.path, e);
-        continue;
+      let title = null;
+      let artist = null;
+      let album = null;
+      let safeTrackNo = 0;
+      let coverDataUrlForCache = null;
+      let coverUrlForAlbum = null;
+
+      if (cached) {
+        title = normalizeText(cached.title, item.fileHandle.name || item.path.replace(/\.mp3$/i, ""));
+        artist = normalizeText(cached.artist, "Unknown artist");
+        album = normalizeText(cached.album, "Unknown album");
+        const cachedTrackNo = parseInt((cached.trackNo ?? 0).toString(), 10);
+        safeTrackNo = Number.isFinite(cachedTrackNo) ? cachedTrackNo : 0;
+      } else {
+        readCount++;
+        if (readCount % 5 === 0 || readCount === mp3Count) {
+          setStatus(`Opening music files to extract metadata and covers… ${readCount}/${mp3Count}`);
+        } else if (canUseCache && processedCount % 10 === 0) {
+          setStatus(`Fast rebuild: restored ${processedCount}/${mp3Count} (scanning new files)…`);
+        }
+
+        let file;
+        try {
+          file = await item.fileHandle.getFile();
+        } catch (e) {
+          console.warn("Could not open file:", item.path, e);
+          continue;
+        }
+
+        const tagRes = await readTagsFromFile(file);
+        const tags = tagRes.ok ? tagRes.tags : {};
+
+        album = normalizeText(tags?.album, "Unknown album");
+        artist = normalizeText(tags?.artist, "Unknown artist");
+        title = normalizeText(tags?.title, file.name.replace(/\.mp3$/i, ""));
+        const trackNoRaw = tags?.track; // can be "3/12" or number
+        const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
+        safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
+        coverDataUrlForCache = coverDataUrlFromTags(tags);
+        coverUrlForAlbum = coverDataUrlForCache || coverUrlFromTags(tags);
       }
-
-      const tagRes = await readTagsFromFile(file);
-      const tags = tagRes.ok ? tagRes.tags : {};
-
-      const album = normalizeText(tags?.album, "Unknown album");
-      const artist = normalizeText(tags?.artist, "Unknown artist");
-      const title = normalizeText(tags?.title, file.name.replace(/\.mp3$/i, ""));
-      const trackNoRaw = tags?.track; // can be "3/12" or number
-      const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
-      const safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
 
       const albumKey = `${artist}|||${album}`;
+      if (!coverDataUrlForCache && coversByAlbumKey[albumKey]) {
+        coverDataUrlForCache = coversByAlbumKey[albumKey];
+      }
+      if (!coverUrlForAlbum && coverDataUrlForCache) coverUrlForAlbum = coverDataUrlForCache;
       let albumId = albumKeyToAlbumId.get(albumKey);
 
       if (!albumId) {
-        //albumId = crypto.randomUUID();
-        // Deterministic album ID so saved state matches after reloads
         albumId = `album:${albumKey}`;
         albumKeyToAlbumId.set(albumKey, albumId);
 
-        const coverUrl = coverUrlFromTags(tags); // might be null
         const albumObj = {
           id: albumId,
           title: album,
           artist,
-          coverUrl,
+          coverUrl: coverUrlForAlbum || null,
           tracks: [],
         };
         library.albumsById.set(albumId, albumObj);
       } else {
-        // If album exists but has no cover yet, try to set it from this track
         const a = library.albumsById.get(albumId);
-        if (a && !a.coverUrl) {
-          const cu = coverUrlFromTags(tags);
-          if (cu) a.coverUrl = cu;
-        }
+        if (a && !a.coverUrl && coverUrlForAlbum) a.coverUrl = coverUrlForAlbum;
       }
 
-      //const trackId = crypto.randomUUID();
-      // Deterministic track ID so saved state matches after reloads
-      const trackId = `track:${pathPrefix}${item.path}`;
+      const trackId = `track:${fullPath}`;
       const trackObj = {
         id: trackId,
+        path: fullPath,
         title,
         artist,
         album,
@@ -673,6 +797,9 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
       library.tracksById.set(trackId, trackObj);
       library.albumsById.get(albumId).tracks.push(trackId);
+
+      cacheTracks.push({ path: trackObj.path, title, artist, album, trackNo: safeTrackNo });
+      if (coverDataUrlForCache && !coversByAlbumKey[albumKey]) coversByAlbumKey[albumKey] = coverDataUrlForCache;
     }
   }
 
@@ -691,13 +818,13 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     })
     .sort((a, b) => (a.artist + " " + a.title).localeCompare(b.artist + " " + b.title));
 
+  await persistLibraryCache({ tracks: cacheTracks, coversByAlbumKey });
+
   renderAlbums(library.albums);
   libInfoEl.textContent = `Connected to ${dirs.length} folder(s). ${library.albums.length} albums found. Tap an album cover to play.`;
   setStatus(`Ready: ${library.albums.length} albums across ${dirs.length} folder(s). Tap an album cover to start.`);
 
   const savedState = await loadPlayerState();
-  playLaterTracks = (savedState?.playLaterTracks || []).filter(id => library.tracksById.has(id));
-
   if (savedState?.queue?.length) {
     queue = savedState.queue.filter(id => library.tracksById.has(id));
     queueIndex = Math.min(savedState.queueIndex ?? 0, Math.max(0, queue.length - 1));
@@ -721,6 +848,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       // Autoplay blocked or file access prompt; user can press play
     }
   }
+
+  await reconcilePlayLaterAfterLibraryReload(savedState);
 }
 
 // ===== Queue + playback =====
@@ -746,6 +875,77 @@ function dedupePlayLaterTracks() {
 
   playLaterTracks = dedupedList;
   return { existingSet: seen, removedCount };
+}
+
+function normalizeSavedPlayLaterEntry(entry) {
+  if (typeof entry === "string") return { id: entry };
+  if (entry && typeof entry === "object") {
+    const { id = null, title = null, artist = null, album = null, path = null } = entry;
+    return { id, title, artist, album, path };
+  }
+  return { id: null };
+}
+
+function remapPlayLaterEntries(savedEntries) {
+  const restored = [];
+  const used = new Set();
+  let missingCount = 0;
+
+  const tracksByFullPath = new Map();
+  const tracksByNormalizedPath = new Map();
+  const tracksByMetadata = new Map();
+
+  for (const track of library.tracksById.values()) {
+    const fullPath = track.path || trackIdToPath(track.id);
+    if (fullPath) {
+      tracksByFullPath.set(fullPath, track.id);
+      const norm = normalizeTrackPath(fullPath);
+      if (norm) tracksByNormalizedPath.set(norm, track.id);
+    }
+
+    const metaKey = metadataKeyForTrack(track);
+    if (metaKey) tracksByMetadata.set(metaKey, track.id);
+  }
+
+  for (const rawEntry of savedEntries || []) {
+    const entry = normalizeSavedPlayLaterEntry(rawEntry);
+    const candidates = [];
+
+    if (entry.id && library.tracksById.has(entry.id)) candidates.push(entry.id);
+
+    const savedPath = entry.path || trackIdToPath(entry.id);
+    const normSavedPath = normalizeTrackPath(savedPath);
+    if (savedPath && tracksByFullPath.has(savedPath)) candidates.push(tracksByFullPath.get(savedPath));
+    if (normSavedPath && tracksByNormalizedPath.has(normSavedPath)) candidates.push(tracksByNormalizedPath.get(normSavedPath));
+
+    const metaKey = metadataKeyForTrack(entry);
+    if (metaKey && tracksByMetadata.has(metaKey)) candidates.push(tracksByMetadata.get(metaKey));
+
+    const match = candidates.find(id => !used.has(id));
+    if (match) {
+      restored.push(match);
+      used.add(match);
+    } else {
+      missingCount++;
+    }
+  }
+
+  return { restored, missingCount };
+}
+
+async function reconcilePlayLaterAfterLibraryReload(savedState) {
+  const savedEntries = Array.isArray(savedState?.playLaterTracks) ? savedState.playLaterTracks : [];
+  const { restored, missingCount } = remapPlayLaterEntries(savedEntries);
+
+  playLaterTracks = restored;
+  renderAlbums(library.albums);
+  rerenderPlayLaterTile();
+
+  if (missingCount) {
+    setStatus(`Restored Play later list, but ${missingCount} item(s) could not be matched and were removed.`);
+  }
+
+  await savePlayerState();
 }
 
 function getAlbumById(albumId) {
@@ -986,6 +1186,8 @@ function next(fromEnded = false) {
 (async function init() {
   renderAlbums([]); // empty until connected/scanned
   setNowPlayingUI(null);
+
+  await loadSettings();
 
   // Auto-try reconnect on startup
   const saved = await loadSavedDirectories();

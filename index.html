@@ -43,6 +43,8 @@
     .panel .small { color:var(--mut); font-size:12px; }
     .panel button { width:100%; margin-top:12px; padding:10px 12px; border-radius:14px;
       background:var(--card); color:var(--fg); border:1px solid var(--line); cursor:pointer; }
+    .panel .modeRow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:10px 0 4px; }
+    .panel .modeRow .pill { width:auto; min-width:90px; padding:10px 12px; border-radius:999px; }
 
     /* Player bar */
     .player {
@@ -224,6 +226,13 @@
     <div class="panel">
       <h2>Library</h2>
       <div class="small" id="libInfo">No folder connected yet.</div>
+      <div class="modeRow">
+        <div>
+          <div class="small">Rebuild speed</div>
+          <div class="small" id="rebuildModeDesc">Fast rebuild (default)</div>
+        </div>
+        <button id="btnToggleRebuildMode" class="pill">Fast</button>
+      </div>
       <button id="btnReconnect">Reconnect / Request Permission</button>
       <button id="btnConnect">Add Music</button>
       <button id="btnClearLibrary">Remove all folders</button>
