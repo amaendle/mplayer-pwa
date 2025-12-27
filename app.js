@@ -75,6 +75,9 @@ let coverSlidePaused = false;
 let coverSlideUrls = [];
 let updateCoverSlideActive = () => {};
 let coverSlideSwipeStart = null;
+let currentTrackRequestId = 0;
+
+const FILE_READ_TIMEOUT_MS = 4000;
 
 const COVER_SWIPE_THRESHOLD_PX = 28;
 
@@ -189,6 +192,24 @@ bigCoverEl.addEventListener("pointerleave", () => {
   coverSlideSwipeStart = null;
   pauseCoverSlideshow(false);
 });
+
+function timeoutError(message) {
+  const err = new Error(message);
+  err.name = "TimeoutError";
+  return err;
+}
+
+async function getFileWithTimeout(fileHandle, timeoutMs = FILE_READ_TIMEOUT_MS) {
+  const filePromise = fileHandle.getFile();
+  filePromise.catch(() => {});
+
+  return Promise.race([
+    filePromise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(timeoutError("Timed out waiting for file handle.")), timeoutMs);
+    }),
+  ]);
+}
 
 function updateNowViewUI(track) {
   bigTitleEl.textContent = track ? (track.title || "Unknown title") : "Nothing playing";
@@ -854,9 +875,10 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
         let file;
         try {
-          file = await item.fileHandle.getFile();
+          file = await getFileWithTimeout(item.fileHandle);
         } catch (e) {
           console.warn("Could not open file:", item.path, e);
+          if (e.name === "TimeoutError") setStatus("A file is temporarily unavailable (network timeout). Skipping…");
           continue;
         }
 
@@ -943,7 +965,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       const images = albumImagesByFolder.get(folderPath) || [];
       for (const image of images) {
         try {
-          const file = await image.fileHandle.getFile();
+          const file = await getFileWithTimeout(image.fileHandle);
           const url = URL.createObjectURL(file);
           if (!seen.has(url)) {
             seen.add(url);
@@ -951,6 +973,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
           }
         } catch (err) {
           console.warn("Could not read cover image:", image.path, err);
+          if (err.name === "TimeoutError") setStatus("Skipping a cover image because the network is slow…");
         }
       }
     }
@@ -1276,8 +1299,24 @@ async function playTrackById(trackId) {
   const track = library.tracksById.get(trackId);
   if (!track) return;
 
+  const loadRequestId = ++currentTrackRequestId;
   // Recreate a fresh object URL each time (safe across reloads)
-  const file = await track.fileHandle.getFile();
+  let file;
+  try {
+    file = await getFileWithTimeout(track.fileHandle, FILE_READ_TIMEOUT_MS);
+  } catch (err) {
+    if (loadRequestId !== currentTrackRequestId) return; // superseded
+    console.warn("Could not open track file:", track.path, err);
+    const msg = err.name === "TimeoutError"
+      ? "Track unavailable: network drive not responding. Try again or skip to another track."
+      : "Could not open track (file unavailable).";
+    setStatus(msg);
+    isPlaying = false;
+    return;
+  }
+
+  if (loadRequestId !== currentTrackRequestId) return; // superseded
+
   const url = URL.createObjectURL(file);
 
   // Clean up previous URL to avoid memory leaks
@@ -1286,7 +1325,14 @@ async function playTrackById(trackId) {
   }
 
   audio.src = url;
-  await audio.play();
+  try {
+    await audio.play();
+  } catch (err) {
+    if (loadRequestId !== currentTrackRequestId) return;
+    console.warn(err);
+    setStatus("Could not start playback (permission/gesture needed). Tap Play again.");
+    return;
+  }
   isPlaying = true;
 
   setNowPlayingUI(track);
