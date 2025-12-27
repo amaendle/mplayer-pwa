@@ -719,6 +719,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
       let title = null;
       let artist = null;
+      let albumArtist = null;
       let album = null;
       let safeTrackNo = 0;
       let coverDataUrlForCache = null;
@@ -727,6 +728,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       if (cached) {
         title = normalizeText(cached.title, item.fileHandle.name || item.path.replace(/\.mp3$/i, ""));
         artist = normalizeText(cached.artist, "Unknown artist");
+        albumArtist = normalizeText(cached.albumArtist, "");
         album = normalizeText(cached.album, "Unknown album");
         const cachedTrackNo = parseInt((cached.trackNo ?? 0).toString(), 10);
         safeTrackNo = Number.isFinite(cachedTrackNo) ? cachedTrackNo : 0;
@@ -751,6 +753,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
         album = normalizeText(tags?.album, "Unknown album");
         artist = normalizeText(tags?.artist, "Unknown artist");
+        albumArtist = normalizeText(tags?.albumartist ?? tags?.albumArtist, "");
         title = normalizeText(tags?.title, file.name.replace(/\.mp3$/i, ""));
         const trackNoRaw = tags?.track; // can be "3/12" or number
         const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
@@ -759,7 +762,9 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         coverUrlForAlbum = coverDataUrlForCache || coverUrlFromTags(tags);
       }
 
-      const albumKey = `${artist}|||${album}`;
+      const albumArtistKey = albumArtist || "";
+      const albumArtistDisplay = albumArtist || artist || "Unknown artist";
+      const albumKey = `${albumArtistKey}|||${album}`;
       if (!coverDataUrlForCache && coversByAlbumKey[albumKey]) {
         coverDataUrlForCache = coversByAlbumKey[albumKey];
       }
@@ -773,7 +778,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         const albumObj = {
           id: albumId,
           title: album,
-          artist,
+          artist: albumArtistDisplay,
           coverUrl: coverUrlForAlbum || null,
           tracks: [],
         };
@@ -789,6 +794,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         path: fullPath,
         title,
         artist,
+        albumArtist,
         album,
         albumId,
         trackNo: safeTrackNo,
@@ -798,7 +804,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       library.tracksById.set(trackId, trackObj);
       library.albumsById.get(albumId).tracks.push(trackId);
 
-      cacheTracks.push({ path: trackObj.path, title, artist, album, trackNo: safeTrackNo });
+      cacheTracks.push({ path: trackObj.path, title, artist, albumArtist, album, trackNo: safeTrackNo });
       if (coverDataUrlForCache && !coversByAlbumKey[albumKey]) coversByAlbumKey[albumKey] = coverDataUrlForCache;
     }
   }
