@@ -91,12 +91,33 @@ const COVER_SWIPE_THRESHOLD_PX = 28;
 nowAlbumPreviewEl.onclick = () => goToAlbumsView();
 
 // Open big now-playing when user taps the bottom bar text area
-document.querySelector(".player .now").onclick = () => openNowView();
+document.querySelector(".player .now").onclick = () => openNowViewForCurrentPlayback();
+easyPlayerEl?.addEventListener("click", (e) => {
+  if (e.target.closest(".bigControls")) return;
+  openNowViewForCurrentPlayback();
+});
 
 // Add open/close + UI update
 function openNowView() {
   nowViewEl.classList.add("open");
   nowViewEl.setAttribute("aria-hidden", "false");
+}
+function openNowViewForCurrentPlayback() {
+  if (queue.length) {
+    const activeTrackId = queue[queueIndex] ?? null;
+    const activeTrack = activeTrackId ? library.tracksById.get(activeTrackId) : null;
+
+    if (activeQueueAlbumId) {
+      currentAlbumId = activeQueueAlbumId;
+    } else if (activeTrack?.albumId) {
+      currentAlbumId = activeTrack.albumId;
+      activeQueueAlbumId = activeTrack.albumId;
+    }
+
+    updateNowViewUI(activeTrack);
+  }
+
+  openNowView();
 }
 function closeNowView() {
   nowViewEl.classList.remove("open");
@@ -285,6 +306,7 @@ let queue = [];        // array of trackIds
 let queueIndex = 0;
 let isPlaying = false;
 let currentAlbumId = null;
+let activeQueueAlbumId = null;
 
 const STATE_KEY = "playerState";
 const SETTINGS_KEY = "settings";
@@ -296,7 +318,7 @@ let easyAccessEnabled = false;
 async function savePlayerState() {
   const currentTrackId = queue[queueIndex] ?? null;
   const state = {
-    currentAlbumId,
+    currentAlbumId: activeQueueAlbumId,
     queue,
     queueIndex,
     currentTrackId,
@@ -631,6 +653,7 @@ function renderTracklist(activeTrackId) {
     row.tabIndex = 0;
 
     const playTrack = () => {
+      activeQueueAlbumId = album.id;
       queue = [...album.tracks];
       queueIndex = idx;
       playCurrent().catch(e => console.warn(e));
@@ -1097,6 +1120,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     queue = savedState.queue.filter(id => library.tracksById.has(id));
     queueIndex = Math.min(savedState.queueIndex ?? 0, Math.max(0, queue.length - 1));
     currentAlbumId = savedState.currentAlbumId ?? null;
+    activeQueueAlbumId = savedState.currentAlbumId ?? null;
   
     // Update UI to show last track even before playing
     const tid = queue[queueIndex];
@@ -1124,6 +1148,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 function buildQueueFromAlbum(albumId) {
   const album = getAlbumById(albumId);
   if (!album) return;
+  activeQueueAlbumId = album.id;
   queue = [...album.tracks];
 }
 
@@ -1357,6 +1382,7 @@ async function clearLibrary() {
   queue = [];
   queueIndex = 0;
   currentAlbumId = null;
+  activeQueueAlbumId = null;
   playLaterTracks = [];
 
   library = {
@@ -1380,6 +1406,7 @@ function stopAndReturnToAlbums() {
   queue = [];
   queueIndex = 0;
   currentAlbumId = null;
+  activeQueueAlbumId = null;
   setNowPlayingUI(null);
   goToAlbumsView();
   setStatus("Playback stopped.");
