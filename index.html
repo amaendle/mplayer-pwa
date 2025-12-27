@@ -48,7 +48,7 @@
 
     /* Player bar */
     .player {
-      position:fixed; left:0; right:0; bottom:0; z-index:3;
+      position:fixed; left:0; right:0; bottom:0; z-index:8;
       border-top:1px solid var(--line);
       background:rgba(25,25,27,.92); backdrop-filter: blur(10px);
       padding:10px 12px;
@@ -87,7 +87,7 @@
       position:fixed; inset:0; z-index:6;
       background:var(--bg);
       display:none;
-      padding:16px 16px 96px;
+      padding:16px 16px 140px;
       overflow-y:auto;
     }
     .nowView.open { display:block; }
@@ -123,6 +123,25 @@
       font-size:22px;
       cursor:pointer;
     }
+
+    /* Easy access layout tweaks */
+    body.easy-access .wrap { padding-bottom:160px; }
+    body.easy-access .grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:16px; }
+    body.easy-access .tile { border-radius:22px; }
+    body.easy-access .player { display:none; }
+    .easyPlayer {
+      display:none;
+      position:fixed; left:0; right:0; bottom:0; z-index:8;
+      padding:16px;
+      background:rgba(25,25,27,.96);
+      border-top:1px solid var(--line);
+      box-shadow:0 -6px 24px rgba(0,0,0,.35);
+    }
+    body.easy-access .easyPlayer { display:block; }
+    .easyPlayer .bigTitle { margin:0 0 4px; }
+    .easyPlayer .bigControls button { height:72px; font-size:24px; }
+
+    body.easy-access .nowView { padding-bottom:220px; }
 
     /* Now Playing album preview strip */
     .nowAlbumPreview {
@@ -239,6 +258,13 @@
         </div>
         <button id="btnToggleRebuildMode" class="pill">Fast</button>
       </div>
+      <div class="modeRow">
+        <div>
+          <div class="small">Easy access mode</div>
+          <div class="small">Larger tiles and big controls</div>
+        </div>
+        <button id="btnToggleEasyAccess" class="pill">Off</button>
+      </div>
       <button id="btnReconnect">Reconnect / Request Permission</button>
       <button id="btnConnect">Add Music</button>
       <button id="btnClearLibrary">Remove all folders</button>
@@ -255,13 +281,17 @@
     <div class="bigTitle" id="bigTitle">Nothing playing</div>
     <div class="bigSub" id="bigSub">Pick an album</div>
   
-    <div class="bigControls">
-      <button id="btnBigPrev">⏮</button>
-      <button id="btnBigPlay">⏯</button>
-      <button id="btnBigNext">⏭</button>
-    </div>
-
     <div class="tracklist" id="tracklist" aria-label="Album tracklist"></div>
+  </div>
+
+  <div class="easyPlayer" id="easyPlayer" aria-live="polite">
+    <div class="bigTitle" id="easyBigTitle">Nothing playing</div>
+    <div class="bigSub" id="easyBigSub">Pick an album tile</div>
+    <div class="bigControls">
+      <button id="btnEasyPrev">⏮</button>
+      <button id="btnEasyPlay">⏯</button>
+      <button id="btnEasyNext">⏭</button>
+    </div>
   </div>
 
   <!-- Player bar -->
