@@ -243,10 +243,16 @@ function updateNowViewUI(track) {
 
   updateAlbumInfoUI(selectedAlbum);
 
-  const coverUrls = albumForCover?.coverUrls?.length
-    ? albumForCover.coverUrls
-    : (albumForCover?.coverUrl ? [albumForCover.coverUrl] : []);
-  renderCoverSlideshow(coverUrls);
+  if (albumForCover?.isPlayLater) {
+    clearCoverSlideshow();
+    coverSlideUrls = [];
+    bigCoverEl.innerHTML = buildPlayLaterCollageHtml();
+  } else {
+    const coverUrls = albumForCover?.coverUrls?.length
+      ? albumForCover.coverUrls
+      : (albumForCover?.coverUrl ? [albumForCover.coverUrl] : []);
+    renderCoverSlideshow(coverUrls);
+  }
 
   const activeTrackId = (track && albumForCover && track.albumId === albumForCover.id)
     ? track.id
