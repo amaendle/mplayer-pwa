@@ -72,6 +72,11 @@ const tracklistEl = document.getElementById("tracklist");
 let coverSlideInterval = null;
 let coverSlideIndex = 0;
 let coverSlidePaused = false;
+let coverSlideUrls = [];
+let updateCoverSlideActive = () => {};
+let coverSlideSwipeStart = null;
+
+const COVER_SWIPE_THRESHOLD_PX = 28;
 
 document.getElementById("btnBigPrev").onclick = prev;
 document.getElementById("btnBigPlay").onclick = playPause;
@@ -110,8 +115,10 @@ function pauseCoverSlideshow(shouldPause) {
 function renderCoverSlideshow(urls) {
   clearCoverSlideshow();
   coverSlidePaused = false;
+  coverSlideUrls = Array.isArray(urls) ? [...urls] : [];
 
-  if (!urls?.length) {
+  if (!coverSlideUrls.length) {
+    coverSlideUrls = [];
     bigCoverEl.innerHTML = "Cover";
     return;
   }
@@ -119,21 +126,21 @@ function renderCoverSlideshow(urls) {
   coverSlideIndex = 0;
   bigCoverEl.innerHTML = `
     <div class="coverSlider">
-      ${urls.map((u, idx) => `<img alt="" src="${u}" class="${idx === 0 ? "active" : ""}">`).join("")}
+      ${coverSlideUrls.map((u, idx) => `<img alt="" src="${u}" class="${idx === 0 ? "active" : ""}">`).join("")}
     </div>
   `;
 
-  if (urls.length <= 1) return;
-
-  const updateActive = () => {
+  updateCoverSlideActive = () => {
     const imgs = bigCoverEl.querySelectorAll(".coverSlider img");
     imgs.forEach((img, idx) => img.classList.toggle("active", idx === coverSlideIndex));
   };
 
+  if (coverSlideUrls.length <= 1) return;
+
   coverSlideInterval = setInterval(() => {
     if (coverSlidePaused) return;
-    coverSlideIndex = (coverSlideIndex + 1) % urls.length;
-    updateActive();
+    coverSlideIndex = (coverSlideIndex + 1) % coverSlideUrls.length;
+    updateCoverSlideActive();
   }, 3200);
 }
 
@@ -142,6 +149,46 @@ bigCoverEl.addEventListener("mouseleave", () => pauseCoverSlideshow(false));
 bigCoverEl.addEventListener("touchstart", () => pauseCoverSlideshow(true));
 bigCoverEl.addEventListener("touchend", () => pauseCoverSlideshow(false));
 bigCoverEl.addEventListener("touchcancel", () => pauseCoverSlideshow(false));
+
+function changeCoverSlide(step) {
+  if (!coverSlideUrls.length) return;
+  if (coverSlideUrls.length === 1) return;
+  coverSlideIndex = (coverSlideIndex + step + coverSlideUrls.length) % coverSlideUrls.length;
+  updateCoverSlideActive();
+}
+
+bigCoverEl.addEventListener("pointerdown", (e) => {
+  if (coverSlideUrls.length <= 1) return;
+  coverSlideSwipeStart = { x: e.clientX, y: e.clientY };
+  pauseCoverSlideshow(true);
+});
+
+bigCoverEl.addEventListener("pointermove", (e) => {
+  if (!coverSlideSwipeStart || coverSlideUrls.length <= 1) return;
+
+  const dx = e.clientX - coverSlideSwipeStart.x;
+  const dy = e.clientY - coverSlideSwipeStart.y;
+
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > COVER_SWIPE_THRESHOLD_PX) {
+    changeCoverSlide(dx > 0 ? -1 : 1);
+    coverSlideSwipeStart = null;
+  }
+});
+
+bigCoverEl.addEventListener("pointerup", () => {
+  coverSlideSwipeStart = null;
+  pauseCoverSlideshow(false);
+});
+
+bigCoverEl.addEventListener("pointercancel", () => {
+  coverSlideSwipeStart = null;
+  pauseCoverSlideshow(false);
+});
+
+bigCoverEl.addEventListener("pointerleave", () => {
+  coverSlideSwipeStart = null;
+  pauseCoverSlideshow(false);
+});
 
 function updateNowViewUI(track) {
   bigTitleEl.textContent = track ? (track.title || "Unknown title") : "Nothing playing";
