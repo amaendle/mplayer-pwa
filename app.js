@@ -88,9 +88,6 @@ const FILE_READ_TIMEOUT_MS = 4000;
 
 const COVER_SWIPE_THRESHOLD_PX = 28;
 
-document.getElementById("btnBigPrev").onclick = prev;
-document.getElementById("btnBigPlay").onclick = playPause;
-document.getElementById("btnBigNext").onclick = next;
 nowAlbumPreviewEl.onclick = () => goToAlbumsView();
 
 // Open big now-playing when user taps the bottom bar text area
