@@ -977,6 +977,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
           title: album,
           artist: albumArtistDisplay,
           albumArtist: albumArtistDisplay,
+          albumArtistTag: albumArtist || "",
           coverUrl: coverUrlForAlbum || null,
           coverUrls: coverUrlForAlbum ? [coverUrlForAlbum] : [],
           folderPaths: [],
@@ -990,6 +991,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         if (a && coverUrlForAlbum && Array.isArray(a.coverUrls) && !a.coverUrls.includes(coverUrlForAlbum)) {
           a.coverUrls.push(coverUrlForAlbum);
         }
+        if (a && !a.albumArtistTag && albumArtist) a.albumArtistTag = albumArtist;
         if (a && !a.albumArtist && albumArtistDisplay) a.albumArtist = albumArtistDisplay;
         const parsedYear = year || null;
         if (a && parsedYear && (!a.year || parsedYear < a.year)) a.year = parsedYear;
@@ -1048,6 +1050,25 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     }
 
     if (!album.coverUrl && album.coverUrls.length) album.coverUrl = album.coverUrls[0];
+  }
+
+  // Derive an informative album artist when no album artist tag exists
+  for (const album of library.albumsById.values()) {
+    if (album.albumArtistTag) continue;
+
+    const artists = [];
+    for (const trackId of album.tracks || []) {
+      const trackArtist = normalizeText(library.tracksById.get(trackId)?.artist ?? "", "");
+      if (trackArtist) artists.push(trackArtist);
+    }
+
+    const uniqueArtists = [...new Set(artists)];
+    const displayArtist = uniqueArtists.length > 1
+      ? "Various artists"
+      : (uniqueArtists[0] || album.artist || "Unknown artist");
+
+    album.artist = displayArtist;
+    album.albumArtist = displayArtist;
   }
 
   // Finalize albums list and sort
