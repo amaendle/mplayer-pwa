@@ -627,7 +627,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     return;
   }
 
-  setStatus(`Found ${mp3Count} MP3 files across ${dirs.length} folder(s). Reading tags…`);
+  setStatus(`Found ${mp3Count} MP3 files across ${dirs.length} folder(s). Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
 
   // Second pass: read tags + build albums
   for (const [dirIdx, dir] of dirs.entries()) {
@@ -638,7 +638,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
       readCount++;
       if (readCount % 5 === 0 || readCount === mp3Count) {
-        setStatus(`Reading music… ${readCount}/${mp3Count}`);
+        setStatus(`Opening music files to extract metadata and covers… ${readCount}/${mp3Count}`);
       }
 
       let file;
