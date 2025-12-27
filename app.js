@@ -65,9 +65,11 @@ document.getElementById("btnToggleEasyAccess").onclick = toggleEasyAccessMode;
 document.getElementById("btnPrev").onclick = prev;
 document.getElementById("btnPlay").onclick = playPause;
 document.getElementById("btnNext").onclick = next;
+document.getElementById("btnStop").onclick = stopAndReturnToAlbums;
 document.getElementById("btnEasyPrev").onclick = prev;
 document.getElementById("btnEasyPlay").onclick = playPause;
 document.getElementById("btnEasyNext").onclick = next;
+document.getElementById("btnEasyStop").onclick = stopAndReturnToAlbums;
 
 const nowViewEl = document.getElementById("nowView");
 const bigCoverEl = document.getElementById("bigCover");
@@ -624,12 +626,6 @@ function renderTracklist(activeTrackId) {
     clearBtn.onclick = clearPlayLater;
     actions.appendChild(clearBtn);
   }
-
-  const stopBtn = document.createElement("button");
-  stopBtn.type = "button";
-  stopBtn.textContent = "Stop / eject";
-  stopBtn.onclick = stopAndReturnToAlbums;
-  actions.appendChild(stopBtn);
 
   tracklistEl.appendChild(actions);
 
