@@ -153,7 +153,17 @@ async function savePlayerState() {
     currentTrackId,
     position: audio.currentTime || 0,
     wasPlaying: !audio.paused,
-    playLaterTracks,
+    playLaterTracks: playLaterTracks.map(id => {
+      const track = library.tracksById.get(id);
+      const path = track?.path || trackIdToPath(id);
+      return {
+        id,
+        title: track?.title ?? null,
+        artist: track?.artist ?? null,
+        album: track?.album ?? null,
+        path: path ?? null,
+      };
+    }),
   };
   await idbSet(STATE_KEY, state);
 }
@@ -170,6 +180,24 @@ function escapeHtml(s) {
 }
 
 function setStatus(msg) { statusEl.textContent = msg; }
+
+function trackIdToPath(trackId) {
+  if (!trackId?.startsWith("track:")) return null;
+  return trackId.slice("track:".length);
+}
+
+function normalizeTrackPath(path) {
+  if (!path) return null;
+  return path.replace(/^dir\d+:/, "");
+}
+
+function metadataKeyForTrack({ title, artist, album }) {
+  const t = (title ?? "").toString().trim().toLowerCase();
+  const ar = (artist ?? "").toString().trim().toLowerCase();
+  const al = (album ?? "").toString().trim().toLowerCase();
+  if (!t && !ar && !al) return null;
+  return `${t}|||${ar}|||${al}`;
+}
 
 function toggleDrawer() {
   drawerEl.classList.toggle("open");
@@ -663,6 +691,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       const trackId = `track:${pathPrefix}${item.path}`;
       const trackObj = {
         id: trackId,
+        path: `${pathPrefix}${item.path}`,
         title,
         artist,
         album,
@@ -696,8 +725,6 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   setStatus(`Ready: ${library.albums.length} albums across ${dirs.length} folder(s). Tap an album cover to start.`);
 
   const savedState = await loadPlayerState();
-  playLaterTracks = (savedState?.playLaterTracks || []).filter(id => library.tracksById.has(id));
-
   if (savedState?.queue?.length) {
     queue = savedState.queue.filter(id => library.tracksById.has(id));
     queueIndex = Math.min(savedState.queueIndex ?? 0, Math.max(0, queue.length - 1));
@@ -721,6 +748,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       // Autoplay blocked or file access prompt; user can press play
     }
   }
+
+  await reconcilePlayLaterAfterLibraryReload(savedState);
 }
 
 // ===== Queue + playback =====
@@ -746,6 +775,77 @@ function dedupePlayLaterTracks() {
 
   playLaterTracks = dedupedList;
   return { existingSet: seen, removedCount };
+}
+
+function normalizeSavedPlayLaterEntry(entry) {
+  if (typeof entry === "string") return { id: entry };
+  if (entry && typeof entry === "object") {
+    const { id = null, title = null, artist = null, album = null, path = null } = entry;
+    return { id, title, artist, album, path };
+  }
+  return { id: null };
+}
+
+function remapPlayLaterEntries(savedEntries) {
+  const restored = [];
+  const used = new Set();
+  let missingCount = 0;
+
+  const tracksByFullPath = new Map();
+  const tracksByNormalizedPath = new Map();
+  const tracksByMetadata = new Map();
+
+  for (const track of library.tracksById.values()) {
+    const fullPath = track.path || trackIdToPath(track.id);
+    if (fullPath) {
+      tracksByFullPath.set(fullPath, track.id);
+      const norm = normalizeTrackPath(fullPath);
+      if (norm) tracksByNormalizedPath.set(norm, track.id);
+    }
+
+    const metaKey = metadataKeyForTrack(track);
+    if (metaKey) tracksByMetadata.set(metaKey, track.id);
+  }
+
+  for (const rawEntry of savedEntries || []) {
+    const entry = normalizeSavedPlayLaterEntry(rawEntry);
+    const candidates = [];
+
+    if (entry.id && library.tracksById.has(entry.id)) candidates.push(entry.id);
+
+    const savedPath = entry.path || trackIdToPath(entry.id);
+    const normSavedPath = normalizeTrackPath(savedPath);
+    if (savedPath && tracksByFullPath.has(savedPath)) candidates.push(tracksByFullPath.get(savedPath));
+    if (normSavedPath && tracksByNormalizedPath.has(normSavedPath)) candidates.push(tracksByNormalizedPath.get(normSavedPath));
+
+    const metaKey = metadataKeyForTrack(entry);
+    if (metaKey && tracksByMetadata.has(metaKey)) candidates.push(tracksByMetadata.get(metaKey));
+
+    const match = candidates.find(id => !used.has(id));
+    if (match) {
+      restored.push(match);
+      used.add(match);
+    } else {
+      missingCount++;
+    }
+  }
+
+  return { restored, missingCount };
+}
+
+async function reconcilePlayLaterAfterLibraryReload(savedState) {
+  const savedEntries = Array.isArray(savedState?.playLaterTracks) ? savedState.playLaterTracks : [];
+  const { restored, missingCount } = remapPlayLaterEntries(savedEntries);
+
+  playLaterTracks = restored;
+  renderAlbums(library.albums);
+  rerenderPlayLaterTile();
+
+  if (missingCount) {
+    setStatus(`Restored Play later list, but ${missingCount} item(s) could not be matched and were removed.`);
+  }
+
+  await savePlayerState();
 }
 
 function getAlbumById(albumId) {
