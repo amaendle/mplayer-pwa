@@ -48,7 +48,7 @@
 
     /* Player bar */
     .player {
-      position:fixed; left:0; right:0; bottom:0; z-index:3;
+      position:fixed; left:0; right:0; bottom:0; z-index:8;
       border-top:1px solid var(--line);
       background:rgba(25,25,27,.92); backdrop-filter: blur(10px);
       padding:10px 12px;
@@ -87,7 +87,7 @@
       position:fixed; inset:0; z-index:6;
       background:var(--bg);
       display:none;
-      padding:16px 16px 96px;
+      padding:16px 16px 140px;
       overflow-y:auto;
     }
     .nowView.open { display:block; }
@@ -131,7 +131,7 @@
     body.easy-access .player { display:none; }
     .easyPlayer {
       display:none;
-      position:fixed; left:0; right:0; bottom:0; z-index:4;
+      position:fixed; left:0; right:0; bottom:0; z-index:8;
       padding:16px;
       background:rgba(25,25,27,.96);
       border-top:1px solid var(--line);
@@ -140,6 +140,8 @@
     body.easy-access .easyPlayer { display:block; }
     .easyPlayer .bigTitle { margin:0 0 4px; }
     .easyPlayer .bigControls button { height:72px; font-size:24px; }
+
+    body.easy-access .nowView { padding-bottom:220px; }
 
     /* Now Playing album preview strip */
     .nowAlbumPreview {
