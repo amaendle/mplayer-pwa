@@ -195,6 +195,17 @@
     .trackRow .meta .artist { color:var(--mut); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .trackRow .state { width:18px; text-align:right; color:var(--mut); }
     .trackRow.active { border-color:var(--line); background:rgba(255,255,255,.04); }
+    .trackRow .actions { display:flex; gap:6px; }
+    .trackRow .actions button {
+      padding:6px 8px;
+      border-radius:8px;
+      border:1px solid var(--line);
+      background:var(--card);
+      color:var(--fg);
+      cursor:pointer;
+      font-size:12px;
+      white-space:nowrap;
+    }
   </style>
 </head>
 <body>

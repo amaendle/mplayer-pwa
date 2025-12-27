@@ -338,6 +338,14 @@ function renderTracklist(activeTrackId) {
     actions.appendChild(playLaterBtn);
   }
 
+  if (album.isPlayLater) {
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Clear Play later";
+    clearBtn.onclick = clearPlayLater;
+    actions.appendChild(clearBtn);
+  }
+
   const stopBtn = document.createElement("button");
   stopBtn.type = "button";
   stopBtn.textContent = "Stop / eject";
@@ -360,13 +368,23 @@ function renderTracklist(activeTrackId) {
 
   album.tracks.forEach((trackId, idx) => {
     const track = library.tracksById.get(trackId);
-    const row = document.createElement("button");
-    row.type = "button";
+    const row = document.createElement("div");
     row.className = "trackRow" + (trackId === activeTrackId ? " active" : "");
-    row.onclick = () => {
+    row.setAttribute("role", "button");
+    row.tabIndex = 0;
+
+    const playTrack = () => {
       queue = [...album.tracks];
       queueIndex = idx;
       playCurrent().catch(e => console.warn(e));
+    };
+
+    row.onclick = playTrack;
+    row.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        playTrack();
+      }
     };
 
     const num = document.createElement("span");
@@ -391,6 +409,33 @@ function renderTracklist(activeTrackId) {
     state.className = "state";
     state.textContent = trackId === activeTrackId ? "▶" : "";
     row.appendChild(state);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    if (!album.isPlayLater) {
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.textContent = "Play later";
+      addBtn.title = "Add this track to Play later";
+      addBtn.onclick = (e) => {
+        e.stopPropagation();
+        queueTrackLater(trackId);
+      };
+      actions.appendChild(addBtn);
+    } else {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.textContent = "Remove";
+      removeBtn.title = "Remove from Play later";
+      removeBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeFromPlayLater(trackId);
+      };
+      actions.appendChild(removeBtn);
+    }
+
+    row.appendChild(actions);
 
     rows.appendChild(row);
   });
@@ -704,6 +749,55 @@ function queueAlbumLater(albumId) {
   playLaterTracks.push(...album.tracks);
   setStatus(`Added ${album.tracks.length} track(s) to Play later.`);
   renderAlbums(library.albums);
+  savePlayerState().catch(() => {});
+}
+
+function queueTrackLater(trackId) {
+  if (!trackId || !library.tracksById.has(trackId)) {
+    setStatus("Track not found.");
+    return;
+  }
+
+  playLaterTracks.push(trackId);
+  setStatus("Added to Play later.");
+  renderAlbums(library.albums);
+  if (currentAlbumId === PLAY_LATER_ID) {
+    const activeTrackId = queue[queueIndex] ?? null;
+    renderTracklist(activeTrackId);
+  }
+  savePlayerState().catch(() => {});
+}
+
+function clearPlayLater() {
+  if (!playLaterTracks.length) {
+    setStatus("Play later is already empty.");
+    return;
+  }
+
+  playLaterTracks = [];
+  setStatus("Play later cleared.");
+  renderAlbums(library.albums);
+  if (currentAlbumId === PLAY_LATER_ID) {
+    const activeTrackId = queue[queueIndex] ?? null;
+    renderTracklist(activeTrackId);
+  }
+  savePlayerState().catch(() => {});
+}
+
+function removeFromPlayLater(trackId) {
+  const idx = playLaterTracks.indexOf(trackId);
+  if (idx === -1) {
+    setStatus("Track not found in Play later.");
+    return;
+  }
+
+  playLaterTracks.splice(idx, 1);
+  setStatus("Removed from Play later.");
+  renderAlbums(library.albums);
+  if (currentAlbumId === PLAY_LATER_ID) {
+    const activeTrackId = queue[queueIndex] ?? null;
+    renderTracklist(activeTrackId);
+  }
   savePlayerState().catch(() => {});
 }
 
