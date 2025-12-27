@@ -69,6 +69,10 @@ const bigSubEl = document.getElementById("bigSub");
 const nowAlbumPreviewEl = document.getElementById("nowAlbumPreview");
 const tracklistEl = document.getElementById("tracklist");
 
+let coverSlideInterval = null;
+let coverSlideIndex = 0;
+let coverSlidePaused = false;
+
 document.getElementById("btnBigPrev").onclick = prev;
 document.getElementById("btnBigPlay").onclick = playPause;
 document.getElementById("btnBigNext").onclick = next;
@@ -92,19 +96,64 @@ function goToAlbumsView() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function clearCoverSlideshow() {
+  if (coverSlideInterval) {
+    clearInterval(coverSlideInterval);
+    coverSlideInterval = null;
+  }
+}
+
+function pauseCoverSlideshow(shouldPause) {
+  coverSlidePaused = shouldPause;
+}
+
+function renderCoverSlideshow(urls) {
+  clearCoverSlideshow();
+  coverSlidePaused = false;
+
+  if (!urls?.length) {
+    bigCoverEl.innerHTML = "Cover";
+    return;
+  }
+
+  coverSlideIndex = 0;
+  bigCoverEl.innerHTML = `
+    <div class="coverSlider">
+      ${urls.map((u, idx) => `<img alt="" src="${u}" class="${idx === 0 ? "active" : ""}">`).join("")}
+    </div>
+  `;
+
+  if (urls.length <= 1) return;
+
+  const updateActive = () => {
+    const imgs = bigCoverEl.querySelectorAll(".coverSlider img");
+    imgs.forEach((img, idx) => img.classList.toggle("active", idx === coverSlideIndex));
+  };
+
+  coverSlideInterval = setInterval(() => {
+    if (coverSlidePaused) return;
+    coverSlideIndex = (coverSlideIndex + 1) % urls.length;
+    updateActive();
+  }, 3200);
+}
+
+bigCoverEl.addEventListener("mouseenter", () => pauseCoverSlideshow(true));
+bigCoverEl.addEventListener("mouseleave", () => pauseCoverSlideshow(false));
+bigCoverEl.addEventListener("touchstart", () => pauseCoverSlideshow(true));
+bigCoverEl.addEventListener("touchend", () => pauseCoverSlideshow(false));
+bigCoverEl.addEventListener("touchcancel", () => pauseCoverSlideshow(false));
+
 function updateNowViewUI(track) {
   bigTitleEl.textContent = track ? (track.title || "Unknown title") : "Nothing playing";
   bigSubEl.textContent = track ? `${track.artist || "Unknown artist"} • ${track.album || "Unknown album"}` : "Pick an album";
 
   // cover: use album cover if we have it
-  let coverUrl = null;
+  let coverUrls = [];
   if (track && currentAlbumId) {
     const alb = getAlbumById(currentAlbumId);
-    coverUrl = alb?.coverUrl || null;
+    coverUrls = alb?.coverUrls?.length ? alb.coverUrls : (alb?.coverUrl ? [alb.coverUrl] : []);
   }
-  bigCoverEl.innerHTML = coverUrl
-    ? `<img alt="" src="${coverUrl}">`
-    : `Cover`;
+  renderCoverSlideshow(coverUrls);
 
   renderTracklist(track?.id || null);
 }
@@ -614,6 +663,10 @@ function isMp3Name(name) {
   return /\.mp3$/i.test(name);
 }
 
+function isImageName(name) {
+  return /\.(jpe?g|png|webp)$/i.test(name);
+}
+
 // ===== Read ID3 tags using jsmediatags =====
 function readTagsFromFile(file) {
   return new Promise((resolve) => {
@@ -676,6 +729,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   const coversByAlbumKey = { ...cachedCovers };
   const canUseCache = fastRebuildEnabled && cachedByPath.size > 0;
 
+  const albumImagesByFolder = new Map();
+
   let mp3Count = 0;
   let readCount = 0;
   let processedCount = 0;
@@ -707,6 +762,15 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     const pathPrefix = dirs.length > 1 ? `dir${dirIdx}:` : "";
 
     for await (const item of walkDirectory(dir)) {
+      if (isImageName(item.path)) {
+        const fullPath = `${pathPrefix}${item.path}`;
+        const folderPath = fullPath.includes("/") ? fullPath.slice(0, fullPath.lastIndexOf("/")) : "";
+        const list = albumImagesByFolder.get(folderPath) || [];
+        list.push({ path: fullPath, fileHandle: item.fileHandle });
+        albumImagesByFolder.set(folderPath, list);
+        continue;
+      }
+
       if (!isMp3Name(item.path)) continue;
 
       processedCount++;
@@ -718,6 +782,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       }
 
       let title = null;
+      const folderPath = fullPath.includes("/") ? fullPath.slice(0, fullPath.lastIndexOf("/")) : "";
       let artist = null;
       let albumArtist = null;
       let album = null;
@@ -780,18 +845,30 @@ async function scanAndBuildLibraryFromDirs(dirs) {
           title: album,
           artist: albumArtistDisplay,
           coverUrl: coverUrlForAlbum || null,
+          coverUrls: coverUrlForAlbum ? [coverUrlForAlbum] : [],
+          folderPaths: [],
           tracks: [],
         };
         library.albumsById.set(albumId, albumObj);
       } else {
         const a = library.albumsById.get(albumId);
         if (a && !a.coverUrl && coverUrlForAlbum) a.coverUrl = coverUrlForAlbum;
+        if (a && coverUrlForAlbum && Array.isArray(a.coverUrls) && !a.coverUrls.includes(coverUrlForAlbum)) {
+          a.coverUrls.push(coverUrlForAlbum);
+        }
+      }
+
+      const albumObj = library.albumsById.get(albumId);
+      if (albumObj) {
+        if (!Array.isArray(albumObj.folderPaths)) albumObj.folderPaths = [];
+        if (!albumObj.folderPaths.includes(folderPath)) albumObj.folderPaths.push(folderPath);
       }
 
       const trackId = `track:${fullPath}`;
       const trackObj = {
         id: trackId,
         path: fullPath,
+        folderPath,
         title,
         artist,
         albumArtist,
@@ -807,6 +884,31 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       cacheTracks.push({ path: trackObj.path, title, artist, albumArtist, album, trackNo: safeTrackNo });
       if (coverDataUrlForCache && !coversByAlbumKey[albumKey]) coversByAlbumKey[albumKey] = coverDataUrlForCache;
     }
+  }
+
+  // Attach additional covers from album folders
+  for (const album of library.albumsById.values()) {
+    if (!Array.isArray(album.coverUrls)) album.coverUrls = album.coverUrl ? [album.coverUrl] : [];
+    const seen = new Set(album.coverUrls);
+    const folders = Array.isArray(album.folderPaths) ? album.folderPaths : [];
+
+    for (const folderPath of folders) {
+      const images = albumImagesByFolder.get(folderPath) || [];
+      for (const image of images) {
+        try {
+          const file = await image.fileHandle.getFile();
+          const url = URL.createObjectURL(file);
+          if (!seen.has(url)) {
+            seen.add(url);
+            album.coverUrls.push(url);
+          }
+        } catch (err) {
+          console.warn("Could not read cover image:", image.path, err);
+        }
+      }
+    }
+
+    if (!album.coverUrl && album.coverUrls.length) album.coverUrl = album.coverUrls[0];
   }
 
   // Finalize albums list and sort
