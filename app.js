@@ -303,6 +303,18 @@ let library = {
 const PLAY_LATER_ID = "playlist:play-later";
 let playLaterTracks = [];
 
+const PLAY_LATER_COLOR_PALETTE = [
+  "#7B5CE6",
+  "#F58F39",
+  "#2EA69B",
+  "#D74B74",
+  "#4E80F0",
+  "#C7BA3A",
+  "#5ECCA6",
+  "#D16FDB",
+  "#4A556A",
+];
+
 let queue = [];        // array of trackIds
 let queueIndex = 0;
 let isPlaying = false;
@@ -460,6 +472,43 @@ async function persistDirectories(handles) {
 }
 
 // ===== Rendering =====
+function getAlbumCoverUrl(albumId) {
+  const album = albumId ? library.albumsById.get(albumId) : null;
+  if (!album) return null;
+  if (Array.isArray(album.coverUrls) && album.coverUrls.length) return album.coverUrls[0];
+  return album.coverUrl || null;
+}
+
+function buildPlayLaterCollageHtml() {
+  const seenAlbumIds = new Set();
+  const coverSources = [];
+
+  for (const trackId of playLaterTracks) {
+    const track = library.tracksById.get(trackId);
+    const albumId = track?.albumId;
+    if (!albumId || seenAlbumIds.has(albumId)) continue;
+    seenAlbumIds.add(albumId);
+
+    const coverUrl = getAlbumCoverUrl(albumId);
+    coverSources.push(coverUrl || null);
+
+    if (coverSources.length >= 9) break;
+  }
+
+  const cells = [];
+  for (let i = 0; i < 9; i++) {
+    const src = coverSources[i] || null;
+    if (src) {
+      cells.push(`<div class="collageCell img"><img alt="" src="${src}"></div>`);
+    } else {
+      const color = PLAY_LATER_COLOR_PALETTE[i % PLAY_LATER_COLOR_PALETTE.length];
+      cells.push(`<div class="collageCell color" style="background:${color};"></div>`);
+    }
+  }
+
+  return `<div class="playLaterCover"><div class="playLaterCollage">${cells.join("")}</div></div>`;
+}
+
 function getPlayLaterAlbum() {
   return {
     id: PLAY_LATER_ID,
@@ -485,9 +534,11 @@ function renderAlbums(albums) {
     tile.className = "tile" + (a.isPlayLater ? " playLaterTile" : "");
 
     // obvious tap to play overlay:
-    const cover = a.coverUrl
-      ? `<img alt="" src="${a.coverUrl}" style="width:100%;height:100%;object-fit:cover;display:block;">`
-      : `<div class="cover">${a.isPlayLater ? "⏩" : "No cover"}</div>`;
+    const cover = a.isPlayLater
+      ? buildPlayLaterCollageHtml()
+      : (a.coverUrl
+        ? `<img alt="" src="${a.coverUrl}" style="width:100%;height:100%;object-fit:cover;display:block;">`
+        : `<div class="cover">No cover</div>`);
     
     tile.innerHTML = `
       <div class="cover" style="padding:0; position:relative;">
@@ -570,9 +621,11 @@ function renderNowAlbumPreview(albums) {
   for (const a of albums) {
     const thumb = document.createElement("div");
     thumb.className = "thumb";
-    thumb.innerHTML = a.coverUrl
-      ? `<img alt="" src="${a.coverUrl}">`
-      : "♪";
+    thumb.innerHTML = a.isPlayLater
+      ? buildPlayLaterCollageHtml()
+      : (a.coverUrl
+        ? `<img alt="" src="${a.coverUrl}">`
+        : "♪");
     nowAlbumPreviewEl.appendChild(thumb);
   }
 }
@@ -586,6 +639,19 @@ function rerenderPlayLaterTile() {
     artistEl.textContent = playLaterTracks.length
       ? `${playLaterTracks.length} track(s)`
       : "Add albums with Play later";
+  }
+
+  const coverEl = tile.querySelector(".cover");
+  if (coverEl) {
+    const existingOverlay = coverEl.querySelector(".playOverlay");
+    if (existingOverlay) existingOverlay.remove();
+
+    coverEl.innerHTML = `
+      ${buildPlayLaterCollageHtml()}
+      <div class="playOverlay">
+        <div class="playBtn">▶</div>
+      </div>
+    `;
   }
 }
 
