@@ -309,6 +309,18 @@ function renderNowAlbumPreview(albums) {
   }
 }
 
+function rerenderPlayLaterTile() {
+  const tile = gridEl.querySelector(".playLaterTile");
+  if (!tile) return;
+
+  const artistEl = tile.querySelector(".artist");
+  if (artistEl) {
+    artistEl.textContent = playLaterTracks.length
+      ? `${playLaterTracks.length} track(s)`
+      : "Add albums with Play later";
+  }
+}
+
 function renderTracklist(activeTrackId) {
   tracklistEl.innerHTML = "";
 
@@ -746,9 +758,39 @@ function queueAlbumLater(albumId) {
     return;
   }
 
-  playLaterTracks.push(...album.tracks);
-  setStatus(`Added ${album.tracks.length} track(s) to Play later.`);
+  const existing = new Set();
+  const dedupedList = [];
+
+  for (const id of playLaterTracks) {
+    if (existing.has(id)) continue;
+    existing.add(id);
+    dedupedList.push(id);
+  }
+
+  playLaterTracks = dedupedList;
+
+  const newTracks = [];
+  for (const id of album.tracks) {
+    if (existing.has(id)) continue;
+    newTracks.push(id);
+    existing.add(id);
+  }
+
+  if (!newTracks.length) {
+    setStatus("All tracks already in Play later.");
+    rerenderPlayLaterTile();
+    savePlayerState().catch(() => {});
+    return;
+  }
+
+  playLaterTracks = [...dedupedList, ...newTracks];
+  setStatus(`Added ${newTracks.length} track(s) to Play later.`);
+  rerenderPlayLaterTile();
   renderAlbums(library.albums);
+  if (currentAlbumId === PLAY_LATER_ID) {
+    const activeTrackId = queue[queueIndex] ?? null;
+    renderTracklist(activeTrackId);
+  }
   savePlayerState().catch(() => {});
 }
 
