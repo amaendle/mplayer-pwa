@@ -42,6 +42,9 @@ const statusEl = document.getElementById("status");
 const gridEl = document.getElementById("grid");
 const nowTitleEl = document.getElementById("nowTitle");
 const nowSubEl = document.getElementById("nowSub");
+const easyPlayerEl = document.getElementById("easyPlayer");
+const easyTitleEl = document.getElementById("easyBigTitle");
+const easySubEl = document.getElementById("easyBigSub");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
@@ -57,17 +60,21 @@ document.getElementById("btnConnect").onclick = connectFolder;
 document.getElementById("btnReconnect").onclick = reconnectFolder;
 document.getElementById("btnClearLibrary").onclick = clearLibrary;
 document.getElementById("btnToggleRebuildMode").onclick = toggleRebuildMode;
+document.getElementById("btnToggleEasyAccess").onclick = toggleEasyAccessMode;
 
 document.getElementById("btnPrev").onclick = prev;
 document.getElementById("btnPlay").onclick = playPause;
 document.getElementById("btnNext").onclick = next;
+document.getElementById("btnEasyPrev").onclick = prev;
+document.getElementById("btnEasyPlay").onclick = playPause;
+document.getElementById("btnEasyNext").onclick = next;
 
 const nowViewEl = document.getElementById("nowView");
 const bigCoverEl = document.getElementById("bigCover");
-const bigTitleEl = document.getElementById("bigTitle");
-const bigSubEl = document.getElementById("bigSub");
 const nowAlbumPreviewEl = document.getElementById("nowAlbumPreview");
 const tracklistEl = document.getElementById("tracklist");
+const nowAlbumTitleEl = document.getElementById("nowAlbumTitle");
+const nowAlbumSubEl = document.getElementById("nowAlbumSub");
 
 let coverSlideInterval = null;
 let coverSlideIndex = 0;
@@ -81,9 +88,6 @@ const FILE_READ_TIMEOUT_MS = 4000;
 
 const COVER_SWIPE_THRESHOLD_PX = 28;
 
-document.getElementById("btnBigPrev").onclick = prev;
-document.getElementById("btnBigPlay").onclick = playPause;
-document.getElementById("btnBigNext").onclick = next;
 nowAlbumPreviewEl.onclick = () => goToAlbumsView();
 
 // Open big now-playing when user taps the bottom bar text area
@@ -212,18 +216,38 @@ async function getFileWithTimeout(fileHandle, timeoutMs = FILE_READ_TIMEOUT_MS) 
 }
 
 function updateNowViewUI(track) {
-  bigTitleEl.textContent = track ? (track.title || "Unknown title") : "Nothing playing";
-  bigSubEl.textContent = track ? `${track.artist || "Unknown artist"} • ${track.album || "Unknown album"}` : "Pick an album";
+  const selectedAlbum = currentAlbumId ? getAlbumById(currentAlbumId) : null;
+  const albumForCover = selectedAlbum || (track?.albumId ? getAlbumById(track.albumId) : null);
 
-  // cover: use album cover if we have it
-  let coverUrls = [];
-  if (track && currentAlbumId) {
-    const alb = getAlbumById(currentAlbumId);
-    coverUrls = alb?.coverUrls?.length ? alb.coverUrls : (alb?.coverUrl ? [alb.coverUrl] : []);
-  }
+  updateAlbumInfoUI(selectedAlbum);
+
+  const coverUrls = albumForCover?.coverUrls?.length
+    ? albumForCover.coverUrls
+    : (albumForCover?.coverUrl ? [albumForCover.coverUrl] : []);
   renderCoverSlideshow(coverUrls);
 
-  renderTracklist(track?.id || null);
+  const activeTrackId = (track && albumForCover && track.albumId === albumForCover.id)
+    ? track.id
+    : null;
+  renderTracklist(activeTrackId);
+}
+
+function updateAlbumInfoUI(album) {
+  if (!nowAlbumTitleEl || !nowAlbumSubEl) return;
+
+  if (!album) {
+    nowAlbumTitleEl.textContent = "No album selected";
+    nowAlbumSubEl.textContent = "Open an album to see its details";
+    return;
+  }
+
+  nowAlbumTitleEl.textContent = album.title || "Unknown album";
+
+  const albumArtist = album.albumArtist || album.artist || "Unknown artist";
+  const parts = [];
+  if (albumArtist) parts.push(albumArtist);
+  if (album.year) parts.push(album.year);
+  nowAlbumSubEl.textContent = parts.length ? parts.join(" • ") : "Album details unavailable";
 }
 
 // ===== Audio element (simple, reliable) =====
@@ -267,6 +291,7 @@ const SETTINGS_KEY = "settings";
 const LIBRARY_CACHE_KEY = "libraryCacheV1";
 
 let fastRebuildEnabled = true;
+let easyAccessEnabled = false;
 
 async function savePlayerState() {
   const currentTrackId = queue[queueIndex] ?? null;
@@ -301,11 +326,15 @@ async function loadSettings() {
   if (saved && typeof saved.fastRebuildEnabled === "boolean") {
     fastRebuildEnabled = saved.fastRebuildEnabled;
   }
+  if (saved && typeof saved.easyAccessEnabled === "boolean") {
+    easyAccessEnabled = saved.easyAccessEnabled;
+  }
   updateRebuildModeUI();
+  updateEasyAccessUI();
 }
 
 async function persistSettings() {
-  await idbSet(SETTINGS_KEY, { fastRebuildEnabled });
+  await idbSet(SETTINGS_KEY, { fastRebuildEnabled, easyAccessEnabled });
 }
 
 async function loadLibraryCache() {
@@ -338,6 +367,17 @@ function updateRebuildModeUI() {
     : "Full check re-reads every file, tags, and cover.";
 }
 
+function updateEasyAccessUI() {
+  const toggleBtn = document.getElementById("btnToggleEasyAccess");
+  if (toggleBtn) {
+    toggleBtn.textContent = easyAccessEnabled ? "On" : "Off";
+  }
+  document.body.classList.toggle("easy-access", easyAccessEnabled);
+  if (easyPlayerEl) {
+    easyPlayerEl.setAttribute("aria-hidden", easyAccessEnabled ? "false" : "true");
+  }
+}
+
 function toggleRebuildMode() {
   fastRebuildEnabled = !fastRebuildEnabled;
   updateRebuildModeUI();
@@ -345,6 +385,15 @@ function toggleRebuildMode() {
   setStatus(fastRebuildEnabled
     ? "Fast rebuild enabled (uses saved tags where possible)."
     : "Full rebuild enabled (re-reads all files).");
+}
+
+function toggleEasyAccessMode() {
+  easyAccessEnabled = !easyAccessEnabled;
+  updateEasyAccessUI();
+  persistSettings().catch(() => {});
+  setStatus(easyAccessEnabled
+    ? "Easy access mode on. Tiles are larger with big controls."
+    : "Easy access mode off.");
 }
 
 function trackIdToPath(trackId) {
@@ -447,7 +496,9 @@ function renderAlbums(albums) {
 
       // If music is already playing, open the album view without altering the queue
       if (!audio.paused && queue.length) {
-        renderTracklist(queue[queueIndex] ?? null);
+        const activeTrackId = queue[queueIndex] ?? null;
+        const activeTrack = activeTrackId ? library.tracksById.get(activeTrackId) : null;
+        updateNowViewUI(activeTrack);
         openNowView();
         return;
       }
@@ -651,11 +702,15 @@ function setNowPlayingUI(track) {
   if (!track) {
     nowTitleEl.textContent = "Nothing playing";
     nowSubEl.textContent = "Pick an album tile";
-    renderTracklist(null);
+    if (easyTitleEl) easyTitleEl.textContent = "Nothing playing";
+    if (easySubEl) easySubEl.textContent = "Pick an album tile";
+    updateNowViewUI(null);
     return;
   }
   nowTitleEl.textContent = track.title || "Unknown title";
   nowSubEl.textContent = `${track.artist || "Unknown artist"} • ${track.album || "Unknown album"}`;
+  if (easyTitleEl) easyTitleEl.textContent = track.title || "Unknown title";
+  if (easySubEl) easySubEl.textContent = `${track.artist || "Unknown artist"} • ${track.album || "Unknown album"}`;
 
   updateNowViewUI(track);
 }
@@ -773,6 +828,11 @@ function normalizeText(s, fallback) {
   return s.length ? s : fallback;
 }
 
+function parseYear(value) {
+  const yearNum = parseInt((value ?? "").toString().slice(0, 4), 10);
+  return Number.isFinite(yearNum) && yearNum > 0 ? yearNum : null;
+}
+
 // ===== Build library =====
 async function scanAndBuildLibraryFromDirs(dirs) {
   // Reset in-memory library (simple MVP). Later we’ll persist metadata + covers.
@@ -855,6 +915,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       let albumArtist = null;
       let album = null;
       let safeTrackNo = 0;
+      let year = null;
       let coverDataUrlForCache = null;
       let coverUrlForAlbum = null;
 
@@ -865,6 +926,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         album = normalizeText(cached.album, "Unknown album");
         const cachedTrackNo = parseInt((cached.trackNo ?? 0).toString(), 10);
         safeTrackNo = Number.isFinite(cachedTrackNo) ? cachedTrackNo : 0;
+        year = parseYear(cached.year);
       } else {
         readCount++;
         if (readCount % 5 === 0 || readCount === mp3Count) {
@@ -892,6 +954,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         const trackNoRaw = tags?.track; // can be "3/12" or number
         const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
         safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
+        year = parseYear(tags?.year);
         coverDataUrlForCache = coverDataUrlFromTags(tags);
         coverUrlForAlbum = coverDataUrlForCache || coverUrlFromTags(tags);
       }
@@ -913,10 +976,13 @@ async function scanAndBuildLibraryFromDirs(dirs) {
           id: albumId,
           title: album,
           artist: albumArtistDisplay,
+          albumArtist: albumArtistDisplay,
+          albumArtistTag: albumArtist || "",
           coverUrl: coverUrlForAlbum || null,
           coverUrls: coverUrlForAlbum ? [coverUrlForAlbum] : [],
           folderPaths: [],
           tracks: [],
+          year: year || null,
         };
         library.albumsById.set(albumId, albumObj);
       } else {
@@ -925,6 +991,10 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         if (a && coverUrlForAlbum && Array.isArray(a.coverUrls) && !a.coverUrls.includes(coverUrlForAlbum)) {
           a.coverUrls.push(coverUrlForAlbum);
         }
+        if (a && !a.albumArtistTag && albumArtist) a.albumArtistTag = albumArtist;
+        if (a && !a.albumArtist && albumArtistDisplay) a.albumArtist = albumArtistDisplay;
+        const parsedYear = year || null;
+        if (a && parsedYear && (!a.year || parsedYear < a.year)) a.year = parsedYear;
       }
 
       const albumObj = library.albumsById.get(albumId);
@@ -944,13 +1014,14 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         album,
         albumId,
         trackNo: safeTrackNo,
+        year: year || null,
         fileHandle: item.fileHandle,
       };
 
       library.tracksById.set(trackId, trackObj);
       library.albumsById.get(albumId).tracks.push(trackId);
 
-      cacheTracks.push({ path: trackObj.path, title, artist, albumArtist, album, trackNo: safeTrackNo });
+      cacheTracks.push({ path: trackObj.path, title, artist, albumArtist, album, trackNo: safeTrackNo, year: year || null });
       if (coverDataUrlForCache && !coversByAlbumKey[albumKey]) coversByAlbumKey[albumKey] = coverDataUrlForCache;
     }
   }
@@ -979,6 +1050,25 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     }
 
     if (!album.coverUrl && album.coverUrls.length) album.coverUrl = album.coverUrls[0];
+  }
+
+  // Derive an informative album artist when no album artist tag exists
+  for (const album of library.albumsById.values()) {
+    if (album.albumArtistTag) continue;
+
+    const artists = [];
+    for (const trackId of album.tracks || []) {
+      const trackArtist = normalizeText(library.tracksById.get(trackId)?.artist ?? "", "");
+      if (trackArtist) artists.push(trackArtist);
+    }
+
+    const uniqueArtists = [...new Set(artists)];
+    const displayArtist = uniqueArtists.length > 1
+      ? "Various artists"
+      : (uniqueArtists[0] || album.artist || "Unknown artist");
+
+    album.artist = displayArtist;
+    album.albumArtist = displayArtist;
   }
 
   // Finalize albums list and sort
