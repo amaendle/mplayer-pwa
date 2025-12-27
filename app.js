@@ -52,7 +52,6 @@ const rebuildModeDescEl = document.getElementById("rebuildModeDesc");
 const rebuildModeButton = document.getElementById("btnToggleRebuildMode");
 
 document.getElementById("btnLibrary").onclick = toggleDrawer;
-document.getElementById("btnToggleLibrary").onclick = toggleDrawer;
 document.getElementById("btnCloseDrawer").onclick = closeDrawer;
 drawerEl.addEventListener("click", (e) => { if (e.target === drawerEl) closeDrawer(); });
 
