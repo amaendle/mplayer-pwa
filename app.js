@@ -256,9 +256,15 @@ function updateNowViewUI(track) {
     renderCoverSlideshow(coverUrls);
   }
 
-  const activeTrackId = (track && albumForCover && track.albumId === albumForCover.id)
-    ? track.id
-    : null;
+  let activeTrackId = null;
+
+  if (albumForCover?.isPlayLater) {
+    activeTrackId = activeQueueAlbumId === PLAY_LATER_ID
+      ? (queue[queueIndex] ?? track?.id ?? null)
+      : null;
+  } else if (track && albumForCover && track.albumId === albumForCover.id) {
+    activeTrackId = track.id;
+  }
   renderTracklist(activeTrackId);
 }
 
