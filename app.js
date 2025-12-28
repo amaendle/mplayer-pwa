@@ -45,6 +45,7 @@ const nowSubEl = document.getElementById("nowSub");
 const easyPlayerEl = document.getElementById("easyPlayer");
 const easyTitleEl = document.getElementById("easyBigTitle");
 const easySubEl = document.getElementById("easyBigSub");
+const playerEl = document.querySelector(".player");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
@@ -84,6 +85,7 @@ let coverSlideUrls = [];
 let updateCoverSlideActive = () => {};
 let coverSlideSwipeStart = null;
 let currentTrackRequestId = 0;
+let hasActiveTrack = false;
 
 const FILE_READ_TIMEOUT_MS = 4000;
 
@@ -400,6 +402,21 @@ function escapeHtml(s) {
 
 function setStatus(msg) { statusEl.textContent = msg; }
 
+function updatePlayerVisibility(hasTrack) {
+  hasActiveTrack = hasTrack;
+  const hidden = !hasActiveTrack;
+  document.body.classList.toggle("player-hidden", hidden);
+
+  if (playerEl) {
+    const playerHidden = hidden || easyAccessEnabled;
+    playerEl.setAttribute("aria-hidden", playerHidden ? "true" : "false");
+  }
+  if (easyPlayerEl) {
+    const easyHidden = hidden || !easyAccessEnabled;
+    easyPlayerEl.setAttribute("aria-hidden", easyHidden ? "true" : "false");
+  }
+}
+
 function updateRebuildModeUI() {
   if (!rebuildModeButton) return;
   rebuildModeButton.textContent = fastRebuildEnabled ? "Fast" : "Full check";
@@ -414,9 +431,7 @@ function updateEasyAccessUI() {
     toggleBtn.textContent = easyAccessEnabled ? "On" : "Off";
   }
   document.body.classList.toggle("easy-access", easyAccessEnabled);
-  if (easyPlayerEl) {
-    easyPlayerEl.setAttribute("aria-hidden", easyAccessEnabled ? "false" : "true");
-  }
+  updatePlayerVisibility(hasActiveTrack);
 }
 
 function toggleRebuildMode() {
@@ -803,6 +818,7 @@ function setNowPlayingUI(track) {
     nowSubEl.textContent = "Pick an album tile";
     if (easyTitleEl) easyTitleEl.textContent = "Nothing playing";
     if (easySubEl) easySubEl.textContent = "Pick an album tile";
+    updatePlayerVisibility(false);
     updateNowViewUI(null);
     return;
   }
@@ -811,6 +827,7 @@ function setNowPlayingUI(track) {
   if (easyTitleEl) easyTitleEl.textContent = track.title || "Unknown title";
   if (easySubEl) easySubEl.textContent = `${track.artist || "Unknown artist"} • ${track.album || "Unknown album"}`;
 
+  updatePlayerVisibility(true);
   updateNowViewUI(track);
 }
 
