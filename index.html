@@ -109,11 +109,27 @@
       position:relative;
       touch-action: pan-y;
     }
+    .coverLayer {
+      position:absolute; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      width:100%; height:100%;
+    }
     .bigCover img { width:100%; height:100%; object-fit:cover; display:block; }
 
     .coverSlider { position:absolute; inset:0; }
     .coverSlider img { position:absolute; inset:0; opacity:0; transition: opacity .5s ease; }
     .coverSlider img.active { opacity:1; }
+
+    .spectrogramCanvas {
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      display:none;
+      background:#050505;
+    }
+    .bigCover.spectrogram-active .coverLayer { opacity:0; visibility:hidden; }
+    .bigCover.spectrogram-active .spectrogramCanvas { display:block; }
 
     .bigTitle { margin:14px 0 4px; font-size:20px; font-weight:750; }
     .bigSub { margin:0 0 16px; color:var(--mut); }
