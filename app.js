@@ -537,22 +537,31 @@ function renderAlbums(albums) {
 
   for (const a of allAlbums) {
     const tile = document.createElement("div");
-    tile.className = "tile" + (a.isPlayLater ? " playLaterTile" : "");
+    const hasCover = !!a.coverUrl || a.isPlayLater;
+    tile.className = "tile"
+      + (a.isPlayLater ? " playLaterTile" : "")
+      + (!a.isPlayLater && !hasCover ? " noCover" : "");
 
     // obvious tap to play overlay:
     const cover = a.isPlayLater
       ? buildPlayLaterCollageHtml()
       : (a.coverUrl
         ? `<img alt="" src="${a.coverUrl}" style="width:100%;height:100%;object-fit:cover;display:block;">`
-        : `<div class="cover">No cover</div>`);
-    
-    tile.innerHTML = `
-      <div class="cover" style="padding:0; position:relative;">
-        ${cover}
-        <div class="playOverlay">
-          <div class="playBtn">▶</div>
+        : "");
+
+    const coverSection = cover
+      ? `
+        <div class="cover" style="padding:0; position:relative;">
+          ${cover}
+          <div class="playOverlay">
+            <div class="playBtn">▶</div>
+          </div>
         </div>
-      </div>
+      `
+      : "";
+
+    tile.innerHTML = `
+      ${coverSection}
       <div class="meta">
         <p class="album">${escapeHtml(a.title)}</p>
         <p class="artist">${escapeHtml(a.artist)}</p>
