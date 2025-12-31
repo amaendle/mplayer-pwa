@@ -9,6 +9,7 @@ if ("serviceWorker" in navigator) {
 // ===== Minimal IndexedDB helper (stores directory handles too) =====
 const DB_NAME = "mp3pwa";
 const STORE = "kv";
+const OPFS_DIR_NAME = "library";
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -35,6 +36,47 @@ async function idbGet(key) {
     req.onsuccess = () => resolve(req.result ?? null);
     req.onerror = () => reject(req.error);
   });
+}
+
+// ===== OPFS helpers =====
+async function ensureOpfsLibraryDir() {
+  if (!navigator.storage?.getDirectory) {
+    throw new Error("OPFS is not available in this browser.");
+  }
+  const root = await navigator.storage.getDirectory();
+  return await root.getDirectoryHandle(OPFS_DIR_NAME, { create: true });
+}
+
+async function directoryHasFiles(dir) {
+  for await (const _ of dir.values()) return true;
+  return false;
+}
+
+function uniqueOpfsName(originalName) {
+  const safeName = (originalName || "track.mp3").replace(/[\\/:]/g, "_");
+  const prefix = Date.now().toString(36);
+  const suffix = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+  return `${prefix}-${suffix}-${safeName}`;
+}
+
+async function copyHandleToOpfs(dir, fileHandle) {
+  const file = await getFileWithTimeout(fileHandle, FILE_READ_TIMEOUT_MS);
+  const targetHandle = await dir.getFileHandle(uniqueOpfsName(fileHandle.name), { create: true });
+  const writable = await targetHandle.createWritable();
+  await writable.write(file);
+  await writable.close();
+  return targetHandle;
+}
+
+async function emptyOpfsLibraryDir() {
+  try {
+    const dir = await ensureOpfsLibraryDir();
+    for await (const entry of dir.values()) {
+      await dir.removeEntry(entry.name, { recursive: entry.kind === "directory" });
+    }
+  } catch (e) {
+    console.warn("Failed to clear OPFS library", e);
+  }
 }
 
 // ===== UI refs =====
@@ -490,7 +532,7 @@ window.addEventListener("beforeunload", () => { savePlayerState(); });
 // ===== App state =====
 let dirHandles = [];
 
-const MUSIC_DIRS_KEY = "musicDirs";
+const MUSIC_DIRS_KEY = "opfsLibraryPresent";
 
 let library = {
   albums: [],            // [{id,title,artist,coverUrl,tracks:[trackIds]}]
@@ -670,16 +712,25 @@ function closeDrawer() {
 }
 
 async function loadSavedDirectories() {
-  const list = await idbGet(MUSIC_DIRS_KEY);
-  if (Array.isArray(list)) return list;
+  try {
+    const dir = await ensureOpfsLibraryDir();
+    const hasFiles = await directoryHasFiles(dir);
+    if (hasFiles) return [dir];
 
-  // Legacy single-folder key
-  const legacy = await idbGet("musicDir");
-  return legacy ? [legacy] : [];
+    // Fallback: if a prior session imported music but directory is empty, honor the hint so
+    // reconnect can still prompt a rebuild once new files are copied.
+    const hasLibraryHint = !!(await idbGet(MUSIC_DIRS_KEY));
+    return hasLibraryHint ? [dir] : [];
+  } catch (e) {
+    console.warn("Could not load OPFS directory", e);
+    return [];
+  }
 }
 
 async function persistDirectories(handles) {
-  await idbSet(MUSIC_DIRS_KEY, handles);
+  const firstDir = handles?.[0];
+  const hasFiles = firstDir ? await directoryHasFiles(firstDir) : false;
+  await idbSet(MUSIC_DIRS_KEY, hasFiles);
 }
 
 // ===== Rendering =====
@@ -810,7 +861,7 @@ function renderAlbums(albums) {
         openNowView();
       } catch (err) {
         console.warn(err);
-        setStatus("Could not play this track. Try another one or reconnect folder.");
+        setStatus("Could not play this track. Try another one or rebuild the library.");
       }
     };
 
@@ -820,7 +871,7 @@ function renderAlbums(albums) {
   if (!albums.length) {
     const emptyMsg = document.createElement("div");
     emptyMsg.style.color = "#a7a7a7";
-    emptyMsg.textContent = "No albums yet. Connect a folder with MP3 files.";
+    emptyMsg.textContent = "No albums yet. Import MP3 files to get started.";
     gridEl.appendChild(emptyMsg);
   }
 
@@ -1025,59 +1076,66 @@ function setNowPlayingUI(track) {
 
 // ===== Folder connect / persist across reloads =====
 async function connectFolder() {
-  if (!window.showDirectoryPicker) {
-    setStatus("This browser doesn’t support folder picking. Use Chrome/Edge/Chromium.");
+  if (!window.showOpenFilePicker || !navigator.storage?.getDirectory) {
+    setStatus("This browser doesn’t support importing. Use Chrome/Edge/Chromium.");
     return;
   }
   try {
-    const handle = await window.showDirectoryPicker();
-    const saved = await loadSavedDirectories();
-    const granted = [];
-    for (const h of saved) {
-      let perm = await h.queryPermission({ mode: "read" });
-      if (perm !== "granted") perm = await h.requestPermission({ mode: "read" });
-      if (perm === "granted") granted.push(h);
+    const handles = await window.showOpenFilePicker({
+      multiple: true,
+      types: [{ description: "MP3 audio", accept: { "audio/mpeg": [".mp3"] } }],
+    });
+    if (!handles.length) {
+      setStatus("No files selected. Nothing imported.");
+      return;
     }
 
-    dirHandles = [...granted, handle];
-    await persistDirectories([...saved, handle]);
+    setStatus("Copying files into offline library…");
+    const dir = await ensureOpfsLibraryDir();
+    let importedCount = 0;
+
+    for (const h of handles) {
+      try {
+        await copyHandleToOpfs(dir, h);
+        importedCount++;
+      } catch (err) {
+        console.warn("Import failed for", h?.name, err);
+      }
+    }
+
+    if (!importedCount) {
+      setStatus("Could not import any files. Try again.");
+      return;
+    }
+
+    dirHandles = [dir];
+    await persistDirectories(dirHandles);
     await idbSet("musicDirConnectedAt", Date.now());
-    libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
-    setStatus("Folder added. Scanning music…");
+    libInfoEl.textContent = `Imported ${importedCount} file(s) into offline library. Scanning…`;
+    setStatus("Import complete. Building library…");
     await scanAndBuildLibraryFromDirs(dirHandles);
   } catch (e) {
     console.warn(e);
-    setStatus("Folder connect canceled or failed.");
+    setStatus("Import canceled or failed.");
   }
 }
 
 async function reconnectFolder() {
   const saved = await loadSavedDirectories();
   if (!saved.length) {
-    setStatus("No saved folders yet. Click “Add Music”.");
+    setStatus("No imported music yet. Click “Add Music”.");
+    libInfoEl.textContent = "No stored music found.";
     return;
   }
   try {
-    const granted = [];
-    for (const handle of saved) {
-      let perm = await handle.queryPermission({ mode: "read" });
-      if (perm !== "granted") perm = await handle.requestPermission({ mode: "read" });
-      if (perm === "granted") granted.push(handle);
-    }
-
-    if (granted.length) {
-      dirHandles = granted;
-      await persistDirectories(saved);
-      libInfoEl.textContent = `Reconnected ${dirHandles.length} folder(s). Scanning…`;
-      setStatus("Reconnected to saved folders. Scanning music…");
-      await scanAndBuildLibraryFromDirs(dirHandles);
-    } else {
-      libInfoEl.textContent = "Saved folders exist, but permission not granted.";
-      setStatus("Permission not granted. Tap “Add Music” to pick them again.");
-    }
+    dirHandles = saved;
+    await persistDirectories(saved);
+    libInfoEl.textContent = "Rebuilding library from imported music…";
+    setStatus("Rebuilding library from stored music…");
+    await scanAndBuildLibraryFromDirs(dirHandles);
   } catch (e) {
     console.warn(e);
-    setStatus("Could not reconnect. Tap “Add Music” to pick folders again.");
+    setStatus("Could not rebuild library. Tap “Add Music” to import again.");
   }
 }
 
@@ -1179,8 +1237,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   }
 
   if (mp3Count === 0) {
-    setStatus("No MP3 files found in connected folders.");
-    libInfoEl.textContent = "Connected, but no MP3s found.";
+    setStatus("No MP3 files found in imported library.");
+    libInfoEl.textContent = "Imported, but no MP3s found.";
     renderAlbums([]);
     return;
   }
@@ -1190,7 +1248,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   } else if (fastRebuildEnabled) {
     setStatus(`Fast rebuild was selected, but no saved tags exist yet. Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
   } else {
-    setStatus(`Found ${mp3Count} MP3 files across ${dirs.length} folder(s). Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
+    setStatus(`Found ${mp3Count} MP3 file(s) in offline library. Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
   }
 
   // Second pass: read tags + build albums
@@ -1397,8 +1455,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   await persistLibraryCache({ tracks: cacheTracks, coversByAlbumKey });
 
   renderAlbums(library.albums);
-  libInfoEl.textContent = `Connected to ${dirs.length} folder(s). ${library.albums.length} albums found. Tap an album cover to play.`;
-  setStatus(`Ready: ${library.albums.length} albums across ${dirs.length} folder(s). Tap an album cover to start.`);
+  libInfoEl.textContent = `${library.albums.length} album(s) imported. Tap an album cover to play.`;
+  setStatus(`Ready: ${library.albums.length} album(s) in offline library. Tap an album cover to start.`);
 
   const savedState = await loadPlayerState();
   if (savedState?.queue?.length) {
@@ -1543,7 +1601,7 @@ function playAlbumNow(albumId) {
   queueIndex = 0;
   playCurrent().then(() => openNowView()).catch(err => {
     console.warn(err);
-    setStatus("Could not play this album. Try another one or reconnect folder.");
+    setStatus("Could not play this album. Try another one or rebuild the library.");
   });
 }
 
@@ -1658,6 +1716,7 @@ function removeFromPlayLater(trackId) {
 }
 
 async function clearLibrary() {
+  await emptyOpfsLibraryDir();
   dirHandles = [];
   await persistDirectories([]);
 
@@ -1679,8 +1738,8 @@ async function clearLibrary() {
   renderAlbums([]);
   setNowPlayingUI(null);
   goToAlbumsView();
-  libInfoEl.textContent = "No folder connected yet. Tap “Add Music”.";
-  setStatus("Library cleared. Use Add Music to connect folders again.");
+  libInfoEl.textContent = "No music imported yet. Tap “Add Music”.";
+  setStatus("Library cleared. Use Add Music to import files again.");
   savePlayerState().catch(() => {});
 }
 
@@ -1796,10 +1855,10 @@ function next(fromEnded = false) {
   const saved = await loadSavedDirectories();
   if (saved.length) {
     dirHandles = saved;
-    libInfoEl.textContent = "Saved folder(s) found. Reconnecting…";
+    libInfoEl.textContent = "Stored music found. Rebuilding…";
     await reconnectFolder();
   } else {
-    libInfoEl.textContent = "No folder connected yet. Tap “Add Music”.";
+    libInfoEl.textContent = "No music imported yet. Tap “Add Music”.";
     setStatus("Not connected. Tap “Add Music”.");
   }
 })();
