@@ -269,7 +269,7 @@
   </header>
 
   <div class="wrap">
-    <div class="status" id="status">Click “Add Music” to add music to the library.</div>
+    <div class="status" id="status">Click “Add Music” to import a music folder into your offline library.</div>
     <div class="grid" id="grid"></div>
   </div>
 
@@ -277,7 +277,7 @@
   <div class="drawer" id="drawer" aria-hidden="true">
     <div class="panel">
       <h2>Library</h2>
-      <div class="small" id="libInfo">No folder connected yet.</div>
+      <div class="small" id="libInfo">No music imported yet.</div>
       <div class="modeRow">
         <div>
           <div class="small">Rebuild speed</div>
@@ -287,14 +287,21 @@
       </div>
       <div class="modeRow">
         <div>
+          <div class="small">Library storage</div>
+          <div class="small" id="libraryModeDesc">Import once into OPFS</div>
+        </div>
+        <button id="btnToggleLibraryMode" class="pill">Offline copy</button>
+      </div>
+      <div class="modeRow">
+        <div>
           <div class="small">Easy access mode</div>
           <div class="small">Larger tiles and big controls</div>
         </div>
         <button id="btnToggleEasyAccess" class="pill">Off</button>
       </div>
-      <button id="btnReconnect">Reconnect / Request Permission</button>
+      <button id="btnReconnect">Rebuild Library</button>
       <button id="btnConnect">Add Music</button>
-      <button id="btnClearLibrary">Remove all folders</button>
+      <button id="btnClearLibrary">Clear imported music</button>
       <button id="btnCloseDrawer">Close</button>
     </div>
   </div>
