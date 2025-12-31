@@ -79,6 +79,39 @@ async function emptyOpfsLibraryDir() {
   }
 }
 
+async function ensureSubdirectory(baseDir, path) {
+  if (!path) return baseDir;
+  const parts = path.split("/").filter(Boolean);
+  let current = baseDir;
+  for (const part of parts) {
+    current = await current.getDirectoryHandle(part, { create: true });
+  }
+  return current;
+}
+
+async function copyDirectoryToOpfs(targetRoot, sourceDir, pathPrefix = "") {
+  let copied = 0;
+  for await (const entry of sourceDir.values()) {
+    const entryPath = pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name;
+    if (entry.kind === "file") {
+      try {
+        const destDir = await ensureSubdirectory(targetRoot, pathPrefix);
+        const destHandle = await destDir.getFileHandle(entry.name, { create: true });
+        const writable = await destHandle.createWritable();
+        const file = await getFileWithTimeout(entry, FILE_READ_TIMEOUT_MS);
+        await writable.write(file);
+        await writable.close();
+        copied++;
+      } catch (err) {
+        console.warn("Failed to copy file", entry?.name, err);
+      }
+    } else if (entry.kind === "directory") {
+      copied += await copyDirectoryToOpfs(targetRoot, entry, entryPath);
+    }
+  }
+  return copied;
+}
+
 // ===== UI refs =====
 const statusEl = document.getElementById("status");
 const gridEl = document.getElementById("grid");
@@ -871,7 +904,7 @@ function renderAlbums(albums) {
   if (!albums.length) {
     const emptyMsg = document.createElement("div");
     emptyMsg.style.color = "#a7a7a7";
-    emptyMsg.textContent = "No albums yet. Import MP3 files to get started.";
+    emptyMsg.textContent = "No albums yet. Import a music folder to get started.";
     gridEl.appendChild(emptyMsg);
   }
 
@@ -1076,35 +1109,24 @@ function setNowPlayingUI(track) {
 
 // ===== Folder connect / persist across reloads =====
 async function connectFolder() {
-  if (!window.showOpenFilePicker || !navigator.storage?.getDirectory) {
-    setStatus("This browser doesn’t support importing. Use Chrome/Edge/Chromium.");
+  if (!window.showDirectoryPicker || !navigator.storage?.getDirectory) {
+    setStatus("This browser doesn’t support folder importing. Use Chrome/Edge/Chromium.");
     return;
   }
   try {
-    const handles = await window.showOpenFilePicker({
-      multiple: true,
-      types: [{ description: "MP3 audio", accept: { "audio/mpeg": [".mp3"] } }],
-    });
-    if (!handles.length) {
-      setStatus("No files selected. Nothing imported.");
+    const sourceDir = await window.showDirectoryPicker();
+    if (!sourceDir) {
+      setStatus("No folder selected. Nothing imported.");
       return;
     }
 
-    setStatus("Copying files into offline library…");
+    setStatus("Copying folder into offline library…");
+    await emptyOpfsLibraryDir();
     const dir = await ensureOpfsLibraryDir();
-    let importedCount = 0;
-
-    for (const h of handles) {
-      try {
-        await copyHandleToOpfs(dir, h);
-        importedCount++;
-      } catch (err) {
-        console.warn("Import failed for", h?.name, err);
-      }
-    }
+    const importedCount = await copyDirectoryToOpfs(dir, sourceDir);
 
     if (!importedCount) {
-      setStatus("Could not import any files. Try again.");
+      setStatus("Could not import any files. Try a different folder.");
       return;
     }
 
