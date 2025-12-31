@@ -86,10 +86,22 @@ let updateCoverSlideActive = () => {};
 let coverSlideSwipeStart = null;
 let currentTrackRequestId = 0;
 let hasActiveTrack = false;
+let spectrogramCanvas = null;
+let spectrogramCtx = null;
+let spectrogramFrequencyData = null;
+let spectrogramBinLookup = [];
+let spectrogramAnimationFrame = null;
+let spectrogramLastDraw = 0;
+let spectrogramVisible = false;
+let audioCtx = null;
+let analyserNode = null;
+let mediaElementSource = null;
 
 const FILE_READ_TIMEOUT_MS = 4000;
 
 const COVER_SWIPE_THRESHOLD_PX = 28;
+const SPECTROGRAM_TIME_STEP_MS = 25;
+const SPECTROGRAM_FFT_SIZE = 4096;
 
 nowAlbumPreviewEl.onclick = () => goToAlbumsView();
 
@@ -143,6 +155,18 @@ function pauseCoverSlideshow(shouldPause) {
   coverSlidePaused = shouldPause;
 }
 
+function setCoverContent(html) {
+  let coverLayer = bigCoverEl.querySelector(".coverLayer");
+  if (!coverLayer) {
+    bigCoverEl.innerHTML = "";
+    coverLayer = document.createElement("div");
+    coverLayer.className = "coverLayer";
+    bigCoverEl.appendChild(coverLayer);
+  }
+  coverLayer.innerHTML = html;
+  ensureSpectrogramCanvas();
+}
+
 function renderCoverSlideshow(urls) {
   clearCoverSlideshow();
   coverSlidePaused = false;
@@ -150,16 +174,16 @@ function renderCoverSlideshow(urls) {
 
   if (!coverSlideUrls.length) {
     coverSlideUrls = [];
-    bigCoverEl.innerHTML = "Cover";
+    setCoverContent("Cover");
     return;
   }
 
   coverSlideIndex = 0;
-  bigCoverEl.innerHTML = `
+  setCoverContent(`
     <div class="coverSlider">
       ${coverSlideUrls.map((u, idx) => `<img alt="" src="${u}" class="${idx === 0 ? "active" : ""}">`).join("")}
     </div>
-  `;
+  `);
 
   updateCoverSlideActive = () => {
     const imgs = bigCoverEl.querySelectorAll(".coverSlider img");
@@ -221,6 +245,163 @@ bigCoverEl.addEventListener("pointerleave", () => {
   pauseCoverSlideshow(false);
 });
 
+function ensureSpectrogramCanvas() {
+  if (!spectrogramCanvas) {
+    spectrogramCanvas = document.createElement("canvas");
+    spectrogramCanvas.className = "spectrogramCanvas";
+    spectrogramCtx = spectrogramCanvas.getContext("2d");
+  }
+  if (!bigCoverEl.contains(spectrogramCanvas)) {
+    bigCoverEl.appendChild(spectrogramCanvas);
+  }
+  resizeSpectrogramCanvas();
+}
+
+function resizeSpectrogramCanvas() {
+  if (!spectrogramCanvas || !bigCoverEl.isConnected) return;
+  const rect = bigCoverEl.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.floor(rect.width));
+  const height = Math.max(1, Math.floor(rect.height));
+  const desiredWidth = Math.max(1, Math.floor(width * dpr));
+  const desiredHeight = Math.max(1, Math.floor(height * dpr));
+
+  if (spectrogramCanvas.width === desiredWidth && spectrogramCanvas.height === desiredHeight) return;
+
+  spectrogramCanvas.width = desiredWidth;
+  spectrogramCanvas.height = desiredHeight;
+  spectrogramCanvas.style.width = `${width}px`;
+  spectrogramCanvas.style.height = `${height}px`;
+  spectrogramCtx = spectrogramCanvas.getContext("2d");
+  spectrogramCtx.imageSmoothingEnabled = false;
+  rebuildSpectrogramBinLookup();
+}
+
+function rebuildSpectrogramBinLookup() {
+  if (!spectrogramCanvas || !analyserNode) return;
+  const height = Math.max(1, spectrogramCanvas.height);
+  const sampleRate = audioCtx?.sampleRate || 48000;
+  const minFreq = 20;
+  const maxFreq = sampleRate / 2;
+  const logMin = Math.log(minFreq);
+  const logMax = Math.log(maxFreq);
+  const binCount = analyserNode.frequencyBinCount;
+
+  spectrogramBinLookup = new Uint16Array(height);
+
+  for (let y = 0; y < height; y++) {
+    const norm = 1 - (y / Math.max(1, height - 1));
+    const freq = Math.exp(logMin + norm * (logMax - logMin));
+    const bin = Math.min(binCount - 1, Math.round((freq / maxFreq) * (binCount - 1)));
+    spectrogramBinLookup[y] = bin;
+  }
+}
+
+async function ensureAudioAnalyser() {
+  if (analyserNode) return true;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) {
+    setStatus("Spectrogram requires Web Audio (not supported in this browser).");
+    return false;
+  }
+  try {
+    audioCtx = new Ctx();
+    mediaElementSource = audioCtx.createMediaElementSource(audio);
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = SPECTROGRAM_FFT_SIZE;
+    analyserNode.smoothingTimeConstant = 0;
+    mediaElementSource.connect(analyserNode);
+    analyserNode.connect(audioCtx.destination);
+    spectrogramFrequencyData = new Uint8Array(analyserNode.frequencyBinCount);
+    rebuildSpectrogramBinLookup();
+    return true;
+  } catch (err) {
+    console.warn(err);
+    setStatus("Could not start spectrogram.");
+    return false;
+  }
+}
+
+function drawSpectrogramFrame(ts) {
+  if (!spectrogramVisible) return;
+  if (!spectrogramCanvas || !spectrogramCtx || !analyserNode || !spectrogramFrequencyData) {
+    spectrogramAnimationFrame = requestAnimationFrame(drawSpectrogramFrame);
+    return;
+  }
+
+  const width = spectrogramCanvas.width;
+  const height = Math.min(spectrogramCanvas.height, spectrogramBinLookup.length || spectrogramCanvas.height);
+  if (width <= 1 || height <= 0) {
+    spectrogramAnimationFrame = requestAnimationFrame(drawSpectrogramFrame);
+    return;
+  }
+
+  const elapsed = spectrogramLastDraw ? (ts - spectrogramLastDraw) : SPECTROGRAM_TIME_STEP_MS;
+  const shift = Math.max(1, Math.round(elapsed / SPECTROGRAM_TIME_STEP_MS));
+  spectrogramLastDraw = ts;
+
+  spectrogramCtx.drawImage(spectrogramCanvas, -shift, 0);
+  spectrogramCtx.fillStyle = "#050505";
+  spectrogramCtx.fillRect(width - shift, 0, shift, spectrogramCanvas.height);
+
+  analyserNode.getByteFrequencyData(spectrogramFrequencyData);
+
+  for (let y = 0; y < height; y++) {
+    const binIndex = spectrogramBinLookup[y] ?? 0;
+    const v = spectrogramFrequencyData[binIndex] ?? 0;
+    const hue = 240 - (v / 255) * 240;
+    const light = 18 + (v / 255) * 60;
+    spectrogramCtx.fillStyle = `hsl(${hue}, 90%, ${light}%)`;
+    spectrogramCtx.fillRect(width - shift, y, shift, 1);
+  }
+
+  spectrogramAnimationFrame = requestAnimationFrame(drawSpectrogramFrame);
+}
+
+async function startSpectrogram() {
+  ensureSpectrogramCanvas();
+  const ok = await ensureAudioAnalyser();
+  if (!ok) {
+    spectrogramVisible = false;
+    bigCoverEl.classList.remove("spectrogram-active");
+    return;
+  }
+  if (audioCtx?.state === "suspended") {
+    try { await audioCtx.resume(); } catch (e) { console.warn(e); }
+  }
+  rebuildSpectrogramBinLookup();
+  spectrogramLastDraw = 0;
+  bigCoverEl.classList.add("spectrogram-active");
+  if (spectrogramAnimationFrame) cancelAnimationFrame(spectrogramAnimationFrame);
+  spectrogramAnimationFrame = requestAnimationFrame(drawSpectrogramFrame);
+}
+
+function stopSpectrogram() {
+  bigCoverEl.classList.remove("spectrogram-active");
+  if (spectrogramAnimationFrame) {
+    cancelAnimationFrame(spectrogramAnimationFrame);
+    spectrogramAnimationFrame = null;
+  }
+}
+
+function toggleSpectrogramMode() {
+  spectrogramVisible = !spectrogramVisible;
+  if (spectrogramVisible) {
+    startSpectrogram();
+  } else {
+    stopSpectrogram();
+  }
+}
+
+function resumeAudioContextIfNeeded() {
+  if (spectrogramVisible && audioCtx?.state === "suspended") {
+    audioCtx.resume().catch(() => {});
+  }
+}
+
+window.addEventListener("resize", resizeSpectrogramCanvas);
+bigCoverEl.addEventListener("click", toggleSpectrogramMode);
+
 function timeoutError(message) {
   const err = new Error(message);
   err.name = "TimeoutError";
@@ -248,7 +429,7 @@ function updateNowViewUI(track) {
   if (albumForCover?.isPlayLater) {
     clearCoverSlideshow();
     coverSlideUrls = [];
-    bigCoverEl.innerHTML = buildPlayLaterCollageHtml();
+    setCoverContent(buildPlayLaterCollageHtml());
   } else {
     const coverUrls = albumForCover?.coverUrls?.length
       ? albumForCover.coverUrls
@@ -300,7 +481,10 @@ audio.addEventListener("timeupdate", () => {
   }
 });
 audio.addEventListener("pause", () => savePlayerState().catch(()=>{}));
-audio.addEventListener("play", () => savePlayerState().catch(()=>{}));
+audio.addEventListener("play", () => {
+  savePlayerState().catch(()=>{});
+  resumeAudioContextIfNeeded();
+});
 window.addEventListener("beforeunload", () => { savePlayerState(); });
 
 // ===== App state =====
@@ -824,6 +1008,8 @@ function setNowPlayingUI(track) {
     nowSubEl.textContent = "Pick an album tile";
     if (easyTitleEl) easyTitleEl.textContent = "Nothing playing";
     if (easySubEl) easySubEl.textContent = "Pick an album tile";
+    spectrogramVisible = false;
+    stopSpectrogram();
     updatePlayerVisibility(false);
     updateNowViewUI(null);
     return;
