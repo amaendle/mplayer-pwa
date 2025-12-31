@@ -10,6 +10,8 @@ if ("serviceWorker" in navigator) {
 const DB_NAME = "mp3pwa";
 const STORE = "kv";
 const OPFS_DIR_NAME = "library";
+const LIBRARY_MODE_OPFS = "opfs";
+const LIBRARY_MODE_DIRECT = "direct";
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -126,6 +128,8 @@ const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
 const rebuildModeDescEl = document.getElementById("rebuildModeDesc");
 const rebuildModeButton = document.getElementById("btnToggleRebuildMode");
+const libraryModeDescEl = document.getElementById("libraryModeDesc");
+const libraryModeButton = document.getElementById("btnToggleLibraryMode");
 
 document.getElementById("btnLibrary").onclick = toggleDrawer;
 document.getElementById("btnCloseDrawer").onclick = closeDrawer;
@@ -135,6 +139,7 @@ document.getElementById("btnConnect").onclick = connectFolder;
 document.getElementById("btnReconnect").onclick = reconnectFolder;
 document.getElementById("btnClearLibrary").onclick = clearLibrary;
 document.getElementById("btnToggleRebuildMode").onclick = toggleRebuildMode;
+document.getElementById("btnToggleLibraryMode").onclick = toggleLibraryMode;
 document.getElementById("btnToggleEasyAccess").onclick = toggleEasyAccessMode;
 
 document.getElementById("btnPrev").onclick = prev;
@@ -597,9 +602,11 @@ let activeQueueAlbumId = null;
 const STATE_KEY = "playerState";
 const SETTINGS_KEY = "settings";
 const LIBRARY_CACHE_KEY = "libraryCacheV1";
+const DIR_HANDLES_KEY = "dirHandles";
 
 let fastRebuildEnabled = true;
 let easyAccessEnabled = false;
+let libraryMode = LIBRARY_MODE_OPFS;
 
 async function savePlayerState() {
   const currentTrackId = queue[queueIndex] ?? null;
@@ -637,12 +644,16 @@ async function loadSettings() {
   if (saved && typeof saved.easyAccessEnabled === "boolean") {
     easyAccessEnabled = saved.easyAccessEnabled;
   }
+  if (saved && typeof saved.libraryMode === "string") {
+    libraryMode = saved.libraryMode === LIBRARY_MODE_DIRECT ? LIBRARY_MODE_DIRECT : LIBRARY_MODE_OPFS;
+  }
   updateRebuildModeUI();
+  updateLibraryModeUI();
   updateEasyAccessUI();
 }
 
 async function persistSettings() {
-  await idbSet(SETTINGS_KEY, { fastRebuildEnabled, easyAccessEnabled });
+  await idbSet(SETTINGS_KEY, { fastRebuildEnabled, easyAccessEnabled, libraryMode });
 }
 
 async function loadLibraryCache() {
@@ -690,6 +701,15 @@ function updateRebuildModeUI() {
     : "Full check re-reads every file, tags, and cover.";
 }
 
+function updateLibraryModeUI() {
+  if (!libraryModeButton) return;
+  const usingOpfs = libraryMode === LIBRARY_MODE_OPFS;
+  libraryModeButton.textContent = usingOpfs ? "Offline copy" : "Direct folder";
+  libraryModeDescEl.textContent = usingOpfs
+    ? "Import once into OPFS and play from the cached copy."
+    : "Keep a live link to your picked folder (original behavior).";
+}
+
 function updateEasyAccessUI() {
   const toggleBtn = document.getElementById("btnToggleEasyAccess");
   if (toggleBtn) {
@@ -706,6 +726,15 @@ function toggleRebuildMode() {
   setStatus(fastRebuildEnabled
     ? "Fast rebuild enabled (uses saved tags where possible)."
     : "Full rebuild enabled (re-reads all files).");
+}
+
+function toggleLibraryMode() {
+  libraryMode = libraryMode === LIBRARY_MODE_OPFS ? LIBRARY_MODE_DIRECT : LIBRARY_MODE_OPFS;
+  updateLibraryModeUI();
+  persistSettings().catch(() => {});
+  setStatus(libraryMode === LIBRARY_MODE_OPFS
+    ? "Workaround active: imports copy into offline storage."
+    : "Original mode active: library reads directly from your folder.");
 }
 
 function toggleEasyAccessMode() {
@@ -744,7 +773,20 @@ function closeDrawer() {
   drawerEl.setAttribute("aria-hidden", "true");
 }
 
+async function ensureReadPermission(handle) {
+  if (!handle?.queryPermission || !handle?.requestPermission) return false;
+  const current = await handle.queryPermission({ mode: "read" });
+  if (current === "granted") return true;
+  const res = await handle.requestPermission({ mode: "read" });
+  return res === "granted";
+}
+
 async function loadSavedDirectories() {
+  if (libraryMode === LIBRARY_MODE_DIRECT) {
+    const storedHandles = await idbGet(DIR_HANDLES_KEY);
+    return Array.isArray(storedHandles) ? storedHandles : [];
+  }
+
   try {
     const dir = await ensureOpfsLibraryDir();
     const hasFiles = await directoryHasFiles(dir);
@@ -761,9 +803,16 @@ async function loadSavedDirectories() {
 }
 
 async function persistDirectories(handles) {
+  if (libraryMode === LIBRARY_MODE_DIRECT) {
+    await idbSet(DIR_HANDLES_KEY, handles || []);
+    await idbSet(MUSIC_DIRS_KEY, false);
+    return;
+  }
+
   const firstDir = handles?.[0];
   const hasFiles = firstDir ? await directoryHasFiles(firstDir) : false;
   await idbSet(MUSIC_DIRS_KEY, hasFiles);
+  await idbSet(DIR_HANDLES_KEY, []);
 }
 
 // ===== Rendering =====
@@ -1109,7 +1158,8 @@ function setNowPlayingUI(track) {
 
 // ===== Folder connect / persist across reloads =====
 async function connectFolder() {
-  if (!window.showDirectoryPicker || !navigator.storage?.getDirectory) {
+  const needsOpfs = libraryMode === LIBRARY_MODE_OPFS;
+  if (!window.showDirectoryPicker || (needsOpfs && !navigator.storage?.getDirectory)) {
     setStatus("This browser doesn’t support folder importing. Use Chrome/Edge/Chromium.");
     return;
   }
@@ -1117,6 +1167,22 @@ async function connectFolder() {
     const sourceDir = await window.showDirectoryPicker();
     if (!sourceDir) {
       setStatus("No folder selected. Nothing imported.");
+      return;
+    }
+
+    if (libraryMode === LIBRARY_MODE_DIRECT) {
+      const granted = await ensureReadPermission(sourceDir);
+      if (!granted) {
+        setStatus("Permission denied. Nothing imported.");
+        return;
+      }
+
+      dirHandles = [sourceDir];
+      await persistDirectories(dirHandles);
+      await idbSet("musicDirConnectedAt", Date.now());
+      libInfoEl.textContent = "Reading music directly from your folder…";
+      setStatus("Building library from the selected folder…");
+      await scanAndBuildLibraryFromDirs(dirHandles);
       return;
     }
 
@@ -1150,6 +1216,26 @@ async function reconnectFolder() {
     return;
   }
   try {
+    if (libraryMode === LIBRARY_MODE_DIRECT) {
+      const grantedHandles = [];
+      for (const handle of saved) {
+        if (await ensureReadPermission(handle)) grantedHandles.push(handle);
+      }
+
+      if (!grantedHandles.length) {
+        setStatus("Permission needed to read your music folder. Tap Add Music again.");
+        libInfoEl.textContent = "Re-connect the folder to rebuild.";
+        return;
+      }
+
+      dirHandles = grantedHandles;
+      await persistDirectories(dirHandles);
+      libInfoEl.textContent = "Rebuilding library from your folder…";
+      setStatus("Rebuilding library from selected folder…");
+      await scanAndBuildLibraryFromDirs(dirHandles);
+      return;
+    }
+
     dirHandles = saved;
     await persistDirectories(saved);
     libInfoEl.textContent = "Rebuilding library from imported music…";
@@ -1738,7 +1824,9 @@ function removeFromPlayLater(trackId) {
 }
 
 async function clearLibrary() {
-  await emptyOpfsLibraryDir();
+  if (libraryMode === LIBRARY_MODE_OPFS) {
+    await emptyOpfsLibraryDir();
+  }
   dirHandles = [];
   await persistDirectories([]);
 
@@ -1761,7 +1849,9 @@ async function clearLibrary() {
   setNowPlayingUI(null);
   goToAlbumsView();
   libInfoEl.textContent = "No music imported yet. Tap “Add Music”.";
-  setStatus("Library cleared. Use Add Music to import files again.");
+  setStatus(libraryMode === LIBRARY_MODE_OPFS
+    ? "Library cleared. Use Add Music to import files again."
+    : "Disconnected from folders. Use Add Music to connect again.");
   savePlayerState().catch(() => {});
 }
 
