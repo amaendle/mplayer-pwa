@@ -736,19 +736,85 @@ function toggleEasyAccessMode() {
     : "Easy access mode off.");
 }
 
-function toggleStorageMode() {
+async function toggleStorageMode() {
   const switchingToOpfs = libraryImportMode !== IMPORT_MODE_OPFS;
   if (switchingToOpfs && !isOpfsSupported()) {
     setStatus("OPFS not supported in this browser. Stay on linked folders.");
     return;
   }
 
-  libraryImportMode = switchingToOpfs ? IMPORT_MODE_OPFS : IMPORT_MODE_DIRECT;
+  if (switchingToOpfs) {
+    const importedBefore = await loadOpfsImportedPaths();
+
+    setStatus("Switching to import-once mode. Copying linked music into app storage…");
+
+    let copiedCount = 0;
+    let skippedCount = 0;
+    let importedFromLinked = false;
+    try {
+      const result = await importLinkedLibraryToOpfs();
+      copiedCount = result.copiedCount;
+      skippedCount = result.skippedCount;
+      importedFromLinked = result.imported;
+    } catch (err) {
+      console.warn("Could not copy linked folders into OPFS:", err);
+    }
+
+    libraryImportMode = IMPORT_MODE_OPFS;
+    updateStorageModeUI();
+    persistSettings().catch(() => {});
+
+    const skippedMsg = skippedCount ? ` Skipped ${skippedCount} duplicate file(s).` : "";
+    const importedMsg = importedFromLinked
+      ? `Imported ${copiedCount} new file(s) into OPFS.${skippedMsg}`
+      : "Switched to import-once mode. Add music to copy folders into app storage.";
+
+    const hasOpfsData = importedBefore.length || importedFromLinked;
+    if (hasOpfsData) {
+      try {
+        const libraryDir = await getOpfsLibraryDir();
+        libInfoEl.textContent = "Using stored library in app storage. Rebuilding…";
+        await scanAndBuildLibraryFromDirs([libraryDir]);
+        setStatus(importedMsg);
+      } catch (err) {
+        console.warn(err);
+        setStatus("Switched to import-once mode, but stored library is unavailable. Try importing again.");
+      }
+    } else {
+      libInfoEl.textContent = "No imported music yet. Tap Add Music to import into app storage.";
+      setStatus(importedMsg);
+    }
+    return;
+  }
+
+  libraryImportMode = IMPORT_MODE_DIRECT;
   updateStorageModeUI();
   persistSettings().catch(() => {});
-  setStatus(libraryImportMode === IMPORT_MODE_OPFS
-    ? "Import once mode: copies picked folders into app storage."
-    : "Linked folder mode: keep permanent access to the picked folders.");
+  setStatus("Linked folder mode: keep permanent access to the picked folders.");
+}
+
+async function importLinkedLibraryToOpfs() {
+  const saved = await loadSavedDirectories();
+  if (!saved.length) return { copiedCount: 0, skippedCount: 0, imported: false };
+
+  const granted = [];
+  for (const handle of saved) {
+    let perm = await handle.queryPermission({ mode: "read" });
+    if (perm !== "granted") perm = await handle.requestPermission({ mode: "read" });
+    if (perm === "granted") granted.push(handle);
+  }
+
+  if (!granted.length) return { copiedCount: 0, skippedCount: 0, imported: false };
+
+  let copiedCount = 0;
+  let skippedCount = 0;
+  for (const handle of granted) {
+    const { copiedCount: copied, skippedCount: skipped } = await importDirectoryOnce(handle);
+    copiedCount += copied;
+    skippedCount += skipped;
+  }
+
+  return { copiedCount, skippedCount, imported: true };
 }
 
 function trackIdToPath(trackId) {
