@@ -664,6 +664,28 @@ async function clearOpfsLibraryData() {
   await persistOpfsImportedPaths([]);
 }
 
+function resetLibraryStatePreservingSavedDirs() {
+  audio.pause();
+  audio.currentTime = 0;
+  isPlaying = false;
+  queue = [];
+  queueIndex = 0;
+  currentAlbumId = null;
+  activeQueueAlbumId = null;
+  playLaterTracks = [];
+
+  library = {
+    albums: [],
+    tracksById: new Map(),
+    albumsById: new Map(),
+  };
+
+  renderAlbums([]);
+  setNowPlayingUI(null);
+  goToAlbumsView();
+  savePlayerState().catch(() => {});
+}
+
 // ===== Small helpers =====
 function escapeHtml(s) {
   return (s ?? "").replace(/[&<>"']/g, c => ({
@@ -787,10 +809,38 @@ async function toggleStorageMode() {
     return;
   }
 
+  setStatus("Switching to linked folder mode. Removing imported copies…");
+  await clearOpfsLibraryData();
+
   libraryImportMode = IMPORT_MODE_DIRECT;
   updateStorageModeUI();
   persistSettings().catch(() => {});
   setStatus("Linked folder mode: keep permanent access to the picked folders.");
+
+  const saved = await loadSavedDirectories();
+  if (!saved.length) {
+    resetLibraryStatePreservingSavedDirs();
+    libInfoEl.textContent = "Linked folder mode enabled. Tap “Add Music” to pick folders.";
+    return;
+  }
+
+  const granted = [];
+  for (const handle of saved) {
+    let perm = await handle.queryPermission({ mode: "read" });
+    if (perm !== "granted") perm = await handle.requestPermission({ mode: "read" });
+    if (perm === "granted") granted.push(handle);
+  }
+
+  if (granted.length) {
+    dirHandles = granted;
+    libInfoEl.textContent = `Reconnected ${dirHandles.length} folder(s). Scanning…`;
+    setStatus("Linked folder mode: scanning saved folders…");
+    await scanAndBuildLibraryFromDirs(dirHandles);
+  } else {
+    resetLibraryStatePreservingSavedDirs();
+    libInfoEl.textContent = "Saved folders exist, but permission not granted.";
+    setStatus("Linked folder mode enabled. Tap “Add Music” to grant access again.");
+  }
 }
 
 async function importLinkedLibraryToOpfs() {
