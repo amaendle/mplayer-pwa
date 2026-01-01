@@ -758,7 +758,36 @@ function trackIdToPath(trackId) {
 
 function normalizeTrackPath(path) {
   if (!path) return null;
-  return path.replace(/^dir\d+:/, "");
+  // Remove directory labels like "Music:" or legacy "dir0:" prefixes
+  const withoutPrefix = path.toString().replace(/^[^/]+:/, "");
+  return withoutPrefix;
+}
+
+function stripRootFolder(path) {
+  const normalized = normalizeTrackPath(path);
+  if (!normalized) return null;
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 1) return normalized;
+  return parts.slice(1).join("/");
+}
+
+function pathVariants(path) {
+  const variants = new Set();
+  const normalized = normalizeTrackPath(path);
+  if (normalized) variants.add(normalized);
+  const noRoot = stripRootFolder(normalized);
+  if (noRoot) variants.add(noRoot);
+  return [...variants];
+}
+
+function buildDirectoryLabels(dirs) {
+  const counts = new Map();
+  return dirs.map((dir, idx) => {
+    const base = (dir?.name || `dir${idx + 1}`).toString();
+    const count = counts.get(base) || 0;
+    counts.set(base, count + 1);
+    return count ? `${base}#${count + 1}` : base;
+  });
 }
 
 function metadataKeyForTrack({ title, artist, album }) {
@@ -1341,10 +1370,18 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     ? await loadLibraryCache()
     : { tracks: [], coversByAlbumKey: {} };
   const cachedByPath = new Map(cachedTracks.map(t => [t.path, t]));
+  const cachedByVariant = new Map();
+  for (const track of cachedTracks) {
+    for (const variant of pathVariants(track.path)) {
+      if (!cachedByVariant.has(variant)) cachedByVariant.set(variant, track);
+    }
+  }
   const coversByAlbumKey = { ...cachedCovers };
   const canUseCache = fastRebuildEnabled && cachedByPath.size > 0;
 
   const albumImagesByFolder = new Map();
+
+  const directoryLabels = buildDirectoryLabels(dirs);
 
   let mp3Count = 0;
   let readCount = 0;
@@ -1379,7 +1416,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
   // Second pass: read tags + build albums
   for (const [dirIdx, dir] of dirs.entries()) {
-    const pathPrefix = dirs.length > 1 ? `dir${dirIdx}:` : "";
+    const pathPrefix = dirs.length > 1 ? `${directoryLabels[dirIdx]}:` : "";
 
     for await (const item of walkDirectory(dir)) {
       if (isImageName(item.path)) {
@@ -1395,7 +1432,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
       processedCount++;
       const fullPath = `${pathPrefix}${item.path}`;
-      const cached = canUseCache ? cachedByPath.get(fullPath) : null;
+      const cached = canUseCache ? (cachedByPath.get(fullPath)
+        || pathVariants(fullPath).map(v => cachedByVariant.get(v)).find(Boolean)) : null;
 
       if (canUseCache && cached && (processedCount % 10 === 0 || processedCount === mp3Count)) {
         setStatus(`Fast rebuild: restored ${processedCount}/${mp3Count} from saved tags…`);
@@ -1657,6 +1695,7 @@ function remapPlayLaterEntries(savedEntries) {
 
   const tracksByFullPath = new Map();
   const tracksByNormalizedPath = new Map();
+  const tracksByVariantPath = new Map();
   const tracksByMetadata = new Map();
 
   for (const track of library.tracksById.values()) {
@@ -1665,6 +1704,9 @@ function remapPlayLaterEntries(savedEntries) {
       tracksByFullPath.set(fullPath, track.id);
       const norm = normalizeTrackPath(fullPath);
       if (norm) tracksByNormalizedPath.set(norm, track.id);
+      for (const variant of pathVariants(fullPath)) {
+        if (!tracksByVariantPath.has(variant)) tracksByVariantPath.set(variant, track.id);
+      }
     }
 
     const metaKey = metadataKeyForTrack(track);
@@ -1681,6 +1723,10 @@ function remapPlayLaterEntries(savedEntries) {
     const normSavedPath = normalizeTrackPath(savedPath);
     if (savedPath && tracksByFullPath.has(savedPath)) candidates.push(tracksByFullPath.get(savedPath));
     if (normSavedPath && tracksByNormalizedPath.has(normSavedPath)) candidates.push(tracksByNormalizedPath.get(normSavedPath));
+    for (const variant of pathVariants(savedPath)) {
+      const mapped = tracksByVariantPath.get(variant);
+      if (mapped) candidates.push(mapped);
+    }
 
     const metaKey = metadataKeyForTrack(entry);
     if (metaKey && tracksByMetadata.has(metaKey)) candidates.push(tracksByMetadata.get(metaKey));
