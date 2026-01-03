@@ -1543,6 +1543,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   const canUseCache = fastRebuildEnabled && cachedByPath.size > 0;
 
   const albumImagesByFolder = new Map();
+  const albumKeysByFolder = new Map();
 
   const directoryLabels = buildDirectoryLabels(dirs);
 
@@ -1667,6 +1668,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
         const albumObj = {
           id: albumId,
+          albumKey,
           title: album,
           artist: albumArtistDisplay,
           albumArtist: albumArtistDisplay,
@@ -1680,6 +1682,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         library.albumsById.set(albumId, albumObj);
       } else {
         const a = library.albumsById.get(albumId);
+        if (a && !a.albumKey) a.albumKey = albumKey;
         if (a && !a.coverUrl && coverUrlForAlbum) a.coverUrl = coverUrlForAlbum;
         if (a && coverUrlForAlbum && Array.isArray(a.coverUrls) && !a.coverUrls.includes(coverUrlForAlbum)) {
           a.coverUrls.push(coverUrlForAlbum);
@@ -1694,6 +1697,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       if (albumObj) {
         if (!Array.isArray(albumObj.folderPaths)) albumObj.folderPaths = [];
         if (!albumObj.folderPaths.includes(folderPath)) albumObj.folderPaths.push(folderPath);
+        if (!albumKeysByFolder.has(folderPath)) albumKeysByFolder.set(folderPath, new Set());
+        albumKeysByFolder.get(folderPath).add(albumKey);
       }
 
       const trackId = `track:${fullPath}`;
@@ -1726,6 +1731,9 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     const folders = Array.isArray(album.folderPaths) ? album.folderPaths : [];
 
     for (const folderPath of folders) {
+      const folderAlbums = albumKeysByFolder.get(folderPath);
+      if (folderAlbums && !folderAlbums.has(album.albumKey)) continue;
+
       const images = albumImagesByFolder.get(folderPath) || [];
       for (const image of images) {
         try {
