@@ -937,6 +937,16 @@ function pathVariants(path) {
   return [...variants];
 }
 
+function folderPathFor(fullPath) {
+  const slashIdx = fullPath.lastIndexOf("/");
+  if (slashIdx >= 0) return fullPath.slice(0, slashIdx);
+
+  const prefixIdx = fullPath.indexOf(":");
+  if (prefixIdx >= 0) return fullPath.slice(0, prefixIdx + 1);
+
+  return "";
+}
+
 function buildDirectoryLabels(dirs) {
   const counts = new Map();
   return dirs.map((dir, idx) => {
@@ -1585,7 +1595,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
     for await (const item of walkDirectory(dir)) {
       if (isImageName(item.path)) {
         const fullPath = `${pathPrefix}${item.path}`;
-        const folderPath = fullPath.includes("/") ? fullPath.slice(0, fullPath.lastIndexOf("/")) : "";
+        const folderPath = folderPathFor(fullPath);
         const list = albumImagesByFolder.get(folderPath) || [];
         list.push({ path: fullPath, fileHandle: item.fileHandle });
         albumImagesByFolder.set(folderPath, list);
@@ -1604,7 +1614,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       }
 
       let title = null;
-      const folderPath = fullPath.includes("/") ? fullPath.slice(0, fullPath.lastIndexOf("/")) : "";
+      const folderPath = folderPathFor(fullPath);
       let artist = null;
       let albumArtist = null;
       let album = null;
