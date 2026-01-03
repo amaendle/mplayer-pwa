@@ -96,6 +96,7 @@ let spectrogramBinLookup = [];
 let spectrogramAnimationFrame = null;
 let spectrogramLastDraw = 0;
 let spectrogramVisible = false;
+let autoSpectrogramActive = false;
 let audioCtx = null;
 let analyserNode = null;
 let mediaElementSource = null;
@@ -380,6 +381,7 @@ async function startSpectrogram() {
 }
 
 function stopSpectrogram() {
+  autoSpectrogramActive = false;
   bigCoverEl.classList.remove("spectrogram-active");
   if (spectrogramAnimationFrame) {
     cancelAnimationFrame(spectrogramAnimationFrame);
@@ -388,6 +390,7 @@ function stopSpectrogram() {
 }
 
 function toggleSpectrogramMode() {
+  autoSpectrogramActive = false;
   spectrogramVisible = !spectrogramVisible;
   if (spectrogramVisible) {
     startSpectrogram();
@@ -427,17 +430,55 @@ function updateNowViewUI(track) {
   const selectedAlbum = currentAlbumId ? getAlbumById(currentAlbumId) : null;
   const albumForCover = selectedAlbum || (track?.albumId ? getAlbumById(track.albumId) : null);
 
+  const isAlbumCurrentlyPlaying = albumForCover
+    ? (albumForCover.isPlayLater
+      ? activeQueueAlbumId === PLAY_LATER_ID
+      : activeQueueAlbumId === albumForCover.id)
+    : false;
+
   updateAlbumInfoUI(selectedAlbum);
 
-  if (albumForCover?.isPlayLater) {
+  const coverUrls = albumForCover?.coverUrls?.length
+    ? albumForCover.coverUrls
+    : (albumForCover?.coverUrl ? [albumForCover.coverUrl] : []);
+  const hasCoverArt = albumForCover?.isPlayLater || coverUrls.length > 0;
+  const shouldShowSpectrogram = !hasCoverArt && isAlbumCurrentlyPlaying;
+  const shouldHideCover = !hasCoverArt && !shouldShowSpectrogram;
+
+  if (bigCoverEl) {
+    bigCoverEl.classList.toggle("hidden", shouldHideCover);
+  }
+
+  if (shouldHideCover) {
+    clearCoverSlideshow();
+    coverSlideUrls = [];
+    autoSpectrogramActive = false;
+    spectrogramVisible = false;
+    stopSpectrogram();
+    if (bigCoverEl) bigCoverEl.innerHTML = "";
+  } else if (albumForCover?.isPlayLater) {
     clearCoverSlideshow();
     coverSlideUrls = [];
     setCoverContent(buildPlayLaterCollageHtml());
-  } else {
-    const coverUrls = albumForCover?.coverUrls?.length
-      ? albumForCover.coverUrls
-      : (albumForCover?.coverUrl ? [albumForCover.coverUrl] : []);
+    if (autoSpectrogramActive && !shouldShowSpectrogram) {
+      spectrogramVisible = false;
+      stopSpectrogram();
+      autoSpectrogramActive = false;
+    }
+  } else if (coverUrls.length) {
     renderCoverSlideshow(coverUrls);
+    if (autoSpectrogramActive && !shouldShowSpectrogram) {
+      spectrogramVisible = false;
+      stopSpectrogram();
+      autoSpectrogramActive = false;
+    }
+  } else {
+    clearCoverSlideshow();
+    coverSlideUrls = [];
+    setCoverContent("");
+    autoSpectrogramActive = true;
+    spectrogramVisible = true;
+    startSpectrogram();
   }
 
   let activeTrackId = null;
