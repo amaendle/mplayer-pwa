@@ -1732,7 +1732,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
     for (const folderPath of folders) {
       const folderAlbums = albumKeysByFolder.get(folderPath);
-      if (folderAlbums && !folderAlbums.has(album.albumKey)) continue;
+      if (!folderAlbums || !folderAlbums.has(album.albumKey)) continue;
 
       const images = albumImagesByFolder.get(folderPath) || [];
       for (const image of images) {
