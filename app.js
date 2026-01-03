@@ -2066,6 +2066,7 @@ async function clearLibrary() {
     await clearOpfsLibraryData();
   }
   await persistDirectories([]);
+  await persistLibraryCache({ tracks: [], coversByAlbumKey: {} });
 
   audio.pause();
   audio.currentTime = 0;
