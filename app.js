@@ -1115,7 +1115,7 @@ function renderAlbums(albums) {
   if (!albums.length) {
     const emptyMsg = document.createElement("div");
     emptyMsg.style.color = "#a7a7a7";
-    emptyMsg.textContent = "No albums yet. Connect a folder with MP3 files.";
+    emptyMsg.textContent = "No albums yet. Connect a folder with MP3 or FLAC files.";
     gridEl.appendChild(emptyMsg);
   }
 
@@ -1330,7 +1330,7 @@ async function importDirectoryOnce(handle) {
   let skippedCount = 0;
 
   for await (const item of walkDirectory(handle)) {
-    if (!isMp3Name(item.path) && !isImageName(item.path)) continue;
+    if (!isAudioName(item.path) && !isImageName(item.path)) continue;
     const destPath = `${handle.name}/${item.path}`;
 
     const alreadyImported = importedPaths.has(destPath)
@@ -1455,8 +1455,14 @@ async function* walkDirectory(dir, path = "") {
   }
 }
 
-function isMp3Name(name) {
-  return /\.mp3$/i.test(name);
+const AUDIO_EXT_REGEX = /\.(mp3|flac)$/i;
+
+function isAudioName(name) {
+  return AUDIO_EXT_REGEX.test(name);
+}
+
+function stripAudioExtension(name) {
+  return name.replace(AUDIO_EXT_REGEX, "");
 }
 
 function isImageName(name) {
@@ -1540,35 +1546,35 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
   const directoryLabels = buildDirectoryLabels(dirs);
 
-  let mp3Count = 0;
+  let audioCount = 0;
   let readCount = 0;
   let processedCount = 0;
   const sourceLabel = libraryImportMode === IMPORT_MODE_OPFS
     ? "imported library"
     : `${dirs.length} folder(s)`;
 
-  // First pass: count MP3s quickly for nicer progress across all folders
+  // First pass: count audio files quickly for nicer progress across all folders
   for (const dir of dirs) {
     for await (const item of walkDirectory(dir)) {
-      if (isMp3Name(item.path)) mp3Count++;
+      if (isAudioName(item.path)) audioCount++;
     }
   }
 
-  if (mp3Count === 0) {
-    setStatus(`No MP3 files found in ${sourceLabel}.`);
+  if (audioCount === 0) {
+    setStatus(`No MP3 or FLAC files found in ${sourceLabel}.`);
     libInfoEl.textContent = libraryImportMode === IMPORT_MODE_OPFS
       ? "Imported library is empty. Tap Add Music to import files."
-      : "Connected, but no MP3s found.";
+      : "Connected, but no MP3/FLAC files found.";
     renderAlbums([]);
     return;
   }
 
   if (canUseCache) {
-    setStatus(`Fast rebuild: restoring saved tags for ${mp3Count} track(s). New files will be fully scanned.`);
+    setStatus(`Fast rebuild: restoring saved tags for ${audioCount} track(s). New files will be fully scanned.`);
   } else if (fastRebuildEnabled) {
     setStatus(`Fast rebuild was selected, but no saved tags exist yet. Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
   } else {
-    setStatus(`Found ${mp3Count} MP3 files across ${sourceLabel}. Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
+    setStatus(`Found ${audioCount} music files across ${sourceLabel}. Reading tags (titles, artists, albums, covers) so the library can be rebuilt…`);
   }
 
   // Second pass: read tags + build albums
@@ -1585,15 +1591,15 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         continue;
       }
 
-      if (!isMp3Name(item.path)) continue;
+      if (!isAudioName(item.path)) continue;
 
       processedCount++;
       const fullPath = `${pathPrefix}${item.path}`;
       const cached = canUseCache ? (cachedByPath.get(fullPath)
         || pathVariants(fullPath).map(v => cachedByVariant.get(v)).find(Boolean)) : null;
 
-      if (canUseCache && cached && (processedCount % 10 === 0 || processedCount === mp3Count)) {
-        setStatus(`Fast rebuild: restored ${processedCount}/${mp3Count} from saved tags…`);
+      if (canUseCache && cached && (processedCount % 10 === 0 || processedCount === audioCount)) {
+        setStatus(`Fast rebuild: restored ${processedCount}/${audioCount} from saved tags…`);
       }
 
       let title = null;
@@ -1607,7 +1613,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       let coverUrlForAlbum = null;
 
       if (cached) {
-        title = normalizeText(cached.title, item.fileHandle.name || item.path.replace(/\.mp3$/i, ""));
+        title = normalizeText(cached.title, item.fileHandle.name || stripAudioExtension(item.path));
         artist = normalizeText(cached.artist, "Unknown artist");
         albumArtist = normalizeText(cached.albumArtist, "");
         album = normalizeText(cached.album, "Unknown album");
@@ -1616,10 +1622,10 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         year = parseYear(cached.year);
       } else {
         readCount++;
-        if (readCount % 5 === 0 || readCount === mp3Count) {
-          setStatus(`Opening music files to extract metadata and covers… ${readCount}/${mp3Count}`);
+        if (readCount % 5 === 0 || readCount === audioCount) {
+          setStatus(`Opening music files to extract metadata and covers… ${readCount}/${audioCount}`);
         } else if (canUseCache && processedCount % 10 === 0) {
-          setStatus(`Fast rebuild: restored ${processedCount}/${mp3Count} (scanning new files)…`);
+          setStatus(`Fast rebuild: restored ${processedCount}/${audioCount} (scanning new files)…`);
         }
 
         let file;
@@ -1637,7 +1643,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         album = normalizeText(tags?.album, "Unknown album");
         artist = normalizeText(tags?.artist, "Unknown artist");
         albumArtist = normalizeText(tags?.albumartist ?? tags?.albumArtist, "");
-        title = normalizeText(tags?.title, file.name.replace(/\.mp3$/i, ""));
+        title = normalizeText(tags?.title, stripAudioExtension(file.name));
         const trackNoRaw = tags?.track; // can be "3/12" or number
         const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
         safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
