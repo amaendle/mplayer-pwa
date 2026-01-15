@@ -46,6 +46,13 @@ const easyPlayerEl = document.getElementById("easyPlayer");
 const easyTitleEl = document.getElementById("easyBigTitle");
 const easySubEl = document.getElementById("easyBigSub");
 const playerEl = document.querySelector(".player");
+const titleViewEl = document.getElementById("titleView");
+const titleCoverEl = document.getElementById("titleCover");
+const titleTrackEl = document.getElementById("titleTrack");
+const titleSubEl = document.getElementById("titleSub");
+const titleTimeCurrentEl = document.getElementById("titleTimeCurrent");
+const titleTimeDurationEl = document.getElementById("titleTimeDuration");
+const titlePositionEl = document.getElementById("titlePosition");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
@@ -73,6 +80,11 @@ document.getElementById("btnEasyPrev").onclick = prev;
 document.getElementById("btnEasyPlay").onclick = playPause;
 document.getElementById("btnEasyNext").onclick = next;
 document.getElementById("btnEasyStop").onclick = stopAndReturnToAlbums;
+document.getElementById("btnTitlePrev")?.addEventListener("click", prev);
+document.getElementById("btnTitlePlay")?.addEventListener("click", playPause);
+document.getElementById("btnTitleNext")?.addEventListener("click", next);
+document.getElementById("btnTitleStop")?.addEventListener("click", stopAndReturnToAlbums);
+document.getElementById("btnCloseTitleView")?.addEventListener("click", closeTitleView);
 
 const nowViewEl = document.getElementById("nowView");
 const bigCoverEl = document.getElementById("bigCover");
@@ -81,12 +93,13 @@ const tracklistEl = document.getElementById("tracklist");
 const nowAlbumTitleEl = document.getElementById("nowAlbumTitle");
 const nowAlbumSubEl = document.getElementById("nowAlbumSub");
 
-let coverSlideInterval = null;
-let coverSlideIndex = 0;
-let coverSlidePaused = false;
-let coverSlideUrls = [];
-let updateCoverSlideActive = () => {};
-let coverSlideSwipeStart = null;
+let nowCoverState = null;
+let titleCoverState = null;
+let titleViewPreviousState = null;
+let titleViewIdleTimer = null;
+let lastUserInputAt = Date.now();
+let isTitleSeeking = false;
+let spectrogramHostEl = null;
 let currentTrackRequestId = 0;
 let hasActiveTrack = false;
 let spectrogramCanvas = null;
@@ -106,8 +119,15 @@ const FILE_READ_TIMEOUT_MS = 4000;
 const COVER_SWIPE_THRESHOLD_PX = 28;
 const SPECTROGRAM_TIME_STEP_MS = 25;
 const SPECTROGRAM_FFT_SIZE = 4096;
+const TITLE_VIEW_IDLE_MS = 10000;
+const COVER_SLIDE_DELAY_MS = 3200;
 
 nowAlbumPreviewEl.onclick = () => goToAlbumsView();
+
+nowCoverState = createCoverState(bigCoverEl);
+titleCoverState = createCoverState(titleCoverEl);
+bindCoverInteractions(nowCoverState);
+bindCoverInteractions(titleCoverState);
 
 // Open big now-playing when user taps the bottom bar text area
 document.querySelector(".player .now").onclick = () => openNowViewForCurrentPlayback();
@@ -118,6 +138,7 @@ easyPlayerEl?.addEventListener("click", (e) => {
 
 // Add open/close + UI update
 function openNowView() {
+  closeTitleView({ restorePrevious: false });
   nowViewEl.classList.add("open");
   nowViewEl.setAttribute("aria-hidden", "false");
 }
@@ -143,127 +164,209 @@ function closeNowView() {
   nowViewEl.setAttribute("aria-hidden", "true");
 }
 
+function openTitleView() {
+  if (!titleViewEl || !hasActiveTrack) return;
+  titleViewPreviousState = {
+    nowViewOpen: nowViewEl.classList.contains("open"),
+  };
+  clearTitleViewAutoOpen();
+  closeNowView();
+  titleViewEl.classList.add("open");
+  titleViewEl.setAttribute("aria-hidden", "false");
+  document.body.classList.add("title-view-open");
+  updateTitleViewUI(getActiveTrack());
+  updateTitleTimeUI();
+}
+
+function closeTitleView({ restorePrevious = true } = {}) {
+  if (!titleViewEl) return;
+  titleViewEl.classList.remove("open");
+  titleViewEl.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("title-view-open");
+  if (restorePrevious && titleViewPreviousState?.nowViewOpen) {
+    openNowView();
+  }
+}
+
 function goToAlbumsView() {
+  closeTitleView({ restorePrevious: false });
   closeNowView();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function clearCoverSlideshow() {
-  if (coverSlideInterval) {
-    clearInterval(coverSlideInterval);
-    coverSlideInterval = null;
+function createCoverState(coverEl) {
+  return {
+    coverEl,
+    slideInterval: null,
+    slideTimeout: null,
+    slideIndex: 0,
+    slidePaused: false,
+    slideUrls: [],
+    updateActive: () => {},
+    swipeStart: null,
+  };
+}
+
+function clearCoverSlideshow(state) {
+  if (!state) return;
+  if (state.slideInterval) {
+    clearInterval(state.slideInterval);
+    state.slideInterval = null;
+  }
+  if (state.slideTimeout) {
+    clearTimeout(state.slideTimeout);
+    state.slideTimeout = null;
   }
 }
 
-function pauseCoverSlideshow(shouldPause) {
-  coverSlidePaused = shouldPause;
+function pauseCoverSlideshow(state, shouldPause) {
+  if (!state) return;
+  state.slidePaused = shouldPause;
 }
 
-function setCoverContent(html) {
-  let coverLayer = bigCoverEl.querySelector(".coverLayer");
+function setCoverContent(state, html) {
+  if (!state?.coverEl) return;
+  let coverLayer = state.coverEl.querySelector(".coverLayer");
   if (!coverLayer) {
-    bigCoverEl.innerHTML = "";
+    state.coverEl.innerHTML = "";
     coverLayer = document.createElement("div");
     coverLayer.className = "coverLayer";
-    bigCoverEl.appendChild(coverLayer);
+    state.coverEl.appendChild(coverLayer);
   }
   coverLayer.innerHTML = html;
-  ensureSpectrogramCanvas();
+  ensureSpectrogramCanvas(state.coverEl);
 }
 
-function renderCoverSlideshow(urls) {
-  clearCoverSlideshow();
-  coverSlidePaused = false;
-  coverSlideUrls = Array.isArray(urls) ? [...urls] : [];
+function showSpectrogramForState(state) {
+  if (!state?.coverEl) return;
+  spectrogramVisible = true;
+  ensureSpectrogramCanvas(state.coverEl);
+  startSpectrogram();
+}
 
-  if (!coverSlideUrls.length) {
-    coverSlideUrls = [];
-    setCoverContent("Cover");
+function scheduleSpectrogramAfterLast(state) {
+  clearCoverSlideshow(state);
+  state.slideTimeout = setTimeout(() => {
+    if (state.slidePaused) {
+      scheduleSpectrogramAfterLast(state);
+      return;
+    }
+    showSpectrogramForState(state);
+  }, COVER_SLIDE_DELAY_MS);
+}
+
+function renderCoverSlideshow(state, urls, options = {}) {
+  if (!state?.coverEl) return;
+  const { loop = true, spectrogramAfterLast = false } = options;
+  clearCoverSlideshow(state);
+  state.slidePaused = false;
+  state.slideUrls = Array.isArray(urls) ? [...urls] : [];
+
+  if (!state.slideUrls.length) {
+    state.slideUrls = [];
+    setCoverContent(state, "Cover");
     return;
   }
 
-  coverSlideIndex = 0;
-  setCoverContent(`
+  state.slideIndex = 0;
+  setCoverContent(state, `
     <div class="coverSlider">
-      ${coverSlideUrls.map((u, idx) => `<img alt="" src="${u}" class="${idx === 0 ? "active" : ""}">`).join("")}
+      ${state.slideUrls.map((u, idx) => `<img alt="" src="${u}" class="${idx === 0 ? "active" : ""}">`).join("")}
     </div>
   `);
 
-  updateCoverSlideActive = () => {
-    const imgs = bigCoverEl.querySelectorAll(".coverSlider img");
-    imgs.forEach((img, idx) => img.classList.toggle("active", idx === coverSlideIndex));
+  state.updateActive = () => {
+    const imgs = state.coverEl.querySelectorAll(".coverSlider img");
+    imgs.forEach((img, idx) => img.classList.toggle("active", idx === state.slideIndex));
   };
 
-  if (coverSlideUrls.length <= 1) return;
-
-  coverSlideInterval = setInterval(() => {
-    if (coverSlidePaused) return;
-    coverSlideIndex = (coverSlideIndex + 1) % coverSlideUrls.length;
-    updateCoverSlideActive();
-  }, 3200);
-}
-
-bigCoverEl.addEventListener("mouseenter", () => pauseCoverSlideshow(true));
-bigCoverEl.addEventListener("mouseleave", () => pauseCoverSlideshow(false));
-bigCoverEl.addEventListener("touchstart", () => pauseCoverSlideshow(true));
-bigCoverEl.addEventListener("touchend", () => pauseCoverSlideshow(false));
-bigCoverEl.addEventListener("touchcancel", () => pauseCoverSlideshow(false));
-
-function changeCoverSlide(step) {
-  if (!coverSlideUrls.length) return;
-  if (coverSlideUrls.length === 1) return;
-  coverSlideIndex = (coverSlideIndex + step + coverSlideUrls.length) % coverSlideUrls.length;
-  updateCoverSlideActive();
-}
-
-bigCoverEl.addEventListener("pointerdown", (e) => {
-  if (coverSlideUrls.length <= 1) return;
-  coverSlideSwipeStart = { x: e.clientX, y: e.clientY };
-  pauseCoverSlideshow(true);
-});
-
-bigCoverEl.addEventListener("pointermove", (e) => {
-  if (!coverSlideSwipeStart || coverSlideUrls.length <= 1) return;
-
-  const dx = e.clientX - coverSlideSwipeStart.x;
-  const dy = e.clientY - coverSlideSwipeStart.y;
-
-  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > COVER_SWIPE_THRESHOLD_PX) {
-    changeCoverSlide(dx > 0 ? -1 : 1);
-    coverSlideSwipeStart = null;
+  if (state.slideUrls.length <= 1) {
+    if (spectrogramAfterLast) {
+      scheduleSpectrogramAfterLast(state);
+    }
+    return;
   }
-});
 
-bigCoverEl.addEventListener("pointerup", () => {
-  coverSlideSwipeStart = null;
-  pauseCoverSlideshow(false);
-});
+  state.slideInterval = setInterval(() => {
+    if (state.slidePaused) return;
+    if (state.slideIndex < state.slideUrls.length - 1) {
+      state.slideIndex += 1;
+      state.updateActive();
+      return;
+    }
+    if (spectrogramAfterLast) {
+      clearCoverSlideshow(state);
+      showSpectrogramForState(state);
+      return;
+    }
+    if (loop) {
+      state.slideIndex = 0;
+      state.updateActive();
+    }
+  }, COVER_SLIDE_DELAY_MS);
+}
 
-bigCoverEl.addEventListener("pointercancel", () => {
-  coverSlideSwipeStart = null;
-  pauseCoverSlideshow(false);
-});
+function changeCoverSlide(state, step) {
+  if (!state?.slideUrls?.length) return;
+  if (state.slideUrls.length === 1) return;
+  state.slideIndex = (state.slideIndex + step + state.slideUrls.length) % state.slideUrls.length;
+  state.updateActive();
+}
 
-bigCoverEl.addEventListener("pointerleave", () => {
-  coverSlideSwipeStart = null;
-  pauseCoverSlideshow(false);
-});
+function bindCoverInteractions(state) {
+  if (!state?.coverEl) return;
+  const coverEl = state.coverEl;
+  coverEl.addEventListener("mouseenter", () => pauseCoverSlideshow(state, true));
+  coverEl.addEventListener("mouseleave", () => pauseCoverSlideshow(state, false));
+  coverEl.addEventListener("touchstart", () => pauseCoverSlideshow(state, true));
+  coverEl.addEventListener("touchend", () => pauseCoverSlideshow(state, false));
+  coverEl.addEventListener("touchcancel", () => pauseCoverSlideshow(state, false));
+  coverEl.addEventListener("pointerdown", (e) => {
+    if (state.slideUrls.length <= 1) return;
+    state.swipeStart = { x: e.clientX, y: e.clientY };
+    pauseCoverSlideshow(state, true);
+  });
+  coverEl.addEventListener("pointermove", (e) => {
+    if (!state.swipeStart || state.slideUrls.length <= 1) return;
+    const dx = e.clientX - state.swipeStart.x;
+    const dy = e.clientY - state.swipeStart.y;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > COVER_SWIPE_THRESHOLD_PX) {
+      changeCoverSlide(state, dx > 0 ? -1 : 1);
+      state.swipeStart = null;
+    }
+  });
+  coverEl.addEventListener("pointerup", () => {
+    state.swipeStart = null;
+    pauseCoverSlideshow(state, false);
+  });
+  coverEl.addEventListener("pointercancel", () => {
+    state.swipeStart = null;
+    pauseCoverSlideshow(state, false);
+  });
+  coverEl.addEventListener("pointerleave", () => {
+    state.swipeStart = null;
+    pauseCoverSlideshow(state, false);
+  });
+  coverEl.addEventListener("click", toggleSpectrogramMode);
+}
 
-function ensureSpectrogramCanvas() {
+function ensureSpectrogramCanvas(hostEl = spectrogramHostEl) {
+  if (!hostEl) return;
+  spectrogramHostEl = hostEl;
   if (!spectrogramCanvas) {
     spectrogramCanvas = document.createElement("canvas");
     spectrogramCanvas.className = "spectrogramCanvas";
     spectrogramCtx = spectrogramCanvas.getContext("2d");
   }
-  if (!bigCoverEl.contains(spectrogramCanvas)) {
-    bigCoverEl.appendChild(spectrogramCanvas);
+  if (!hostEl.contains(spectrogramCanvas)) {
+    hostEl.appendChild(spectrogramCanvas);
   }
   resizeSpectrogramCanvas();
 }
 
 function resizeSpectrogramCanvas() {
-  if (!spectrogramCanvas || !bigCoverEl.isConnected) return;
-  const rect = bigCoverEl.getBoundingClientRect();
+  if (!spectrogramCanvas || !spectrogramHostEl?.isConnected) return;
+  const rect = spectrogramHostEl.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
@@ -363,11 +466,12 @@ function drawSpectrogramFrame(ts) {
 }
 
 async function startSpectrogram() {
-  ensureSpectrogramCanvas();
+  if (!spectrogramHostEl) return;
+  ensureSpectrogramCanvas(spectrogramHostEl);
   const ok = await ensureAudioAnalyser();
   if (!ok) {
     spectrogramVisible = false;
-    bigCoverEl.classList.remove("spectrogram-active");
+    spectrogramHostEl?.classList.remove("spectrogram-active");
     return;
   }
   if (audioCtx?.state === "suspended") {
@@ -375,14 +479,14 @@ async function startSpectrogram() {
   }
   rebuildSpectrogramBinLookup();
   spectrogramLastDraw = 0;
-  bigCoverEl.classList.add("spectrogram-active");
+  spectrogramHostEl?.classList.add("spectrogram-active");
   if (spectrogramAnimationFrame) cancelAnimationFrame(spectrogramAnimationFrame);
   spectrogramAnimationFrame = requestAnimationFrame(drawSpectrogramFrame);
 }
 
 function stopSpectrogram() {
   autoSpectrogramActive = false;
-  bigCoverEl.classList.remove("spectrogram-active");
+  spectrogramHostEl?.classList.remove("spectrogram-active");
   if (spectrogramAnimationFrame) {
     cancelAnimationFrame(spectrogramAnimationFrame);
     spectrogramAnimationFrame = null;
@@ -405,8 +509,49 @@ function resumeAudioContextIfNeeded() {
   }
 }
 
+function clearTitleViewAutoOpen() {
+  if (titleViewIdleTimer) {
+    clearTimeout(titleViewIdleTimer);
+    titleViewIdleTimer = null;
+  }
+}
+
+function scheduleTitleViewAutoOpen() {
+  clearTitleViewAutoOpen();
+  if (!isPlaying || !hasActiveTrack || titleViewEl?.classList.contains("open")) return;
+  const idleFor = Date.now() - lastUserInputAt;
+  if (idleFor >= TITLE_VIEW_IDLE_MS) {
+    openTitleView();
+    return;
+  }
+  titleViewIdleTimer = setTimeout(() => {
+    if (!isPlaying || !hasActiveTrack) return;
+    if (Date.now() - lastUserInputAt >= TITLE_VIEW_IDLE_MS) {
+      openTitleView();
+    } else {
+      scheduleTitleViewAutoOpen();
+    }
+  }, TITLE_VIEW_IDLE_MS - idleFor);
+}
+
+function noteUserActivity() {
+  lastUserInputAt = Date.now();
+  if (isPlaying) scheduleTitleViewAutoOpen();
+}
+
+["pointerdown", "keydown", "touchstart"].forEach((evt) => {
+  document.addEventListener(evt, noteUserActivity, { passive: true });
+});
+
 window.addEventListener("resize", resizeSpectrogramCanvas);
-bigCoverEl.addEventListener("click", toggleSpectrogramMode);
+titlePositionEl?.addEventListener("pointerdown", () => { isTitleSeeking = true; });
+titlePositionEl?.addEventListener("pointerup", () => { isTitleSeeking = false; });
+titlePositionEl?.addEventListener("change", () => { isTitleSeeking = false; });
+titlePositionEl?.addEventListener("input", () => {
+  if (!Number.isFinite(audio.duration)) return;
+  audio.currentTime = Number(titlePositionEl.value || 0);
+  updateTitleTimeUI();
+});
 
 function timeoutError(message) {
   const err = new Error(message);
@@ -424,6 +569,31 @@ async function getFileWithTimeout(fileHandle, timeoutMs = FILE_READ_TIMEOUT_MS) 
       setTimeout(() => reject(timeoutError("Timed out waiting for file handle.")), timeoutMs);
     }),
   ]);
+}
+
+function getActiveTrack() {
+  const activeTrackId = queue[queueIndex] ?? null;
+  return activeTrackId ? library.tracksById.get(activeTrackId) : null;
+}
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds)) return "0:00";
+  const total = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
+function updateTitleTimeUI() {
+  if (!titleTimeCurrentEl || !titleTimeDurationEl || !titlePositionEl) return;
+  const current = audio.currentTime || 0;
+  const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+  titleTimeCurrentEl.textContent = formatTime(current);
+  titleTimeDurationEl.textContent = formatTime(duration);
+  titlePositionEl.max = duration ? `${duration}` : "0";
+  if (!isTitleSeeking) {
+    titlePositionEl.value = `${current}`;
+  }
 }
 
 function updateNowViewUI(track) {
@@ -445,40 +615,39 @@ function updateNowViewUI(track) {
   const shouldShowSpectrogram = !hasCoverArt && isAlbumCurrentlyPlaying;
   const shouldHideCover = !hasCoverArt && !shouldShowSpectrogram;
 
-  if (bigCoverEl) {
-    bigCoverEl.classList.toggle("hidden", shouldHideCover);
+  if (nowCoverState?.coverEl) {
+    nowCoverState.coverEl.classList.toggle("hidden", shouldHideCover);
   }
 
   if (shouldHideCover) {
-    clearCoverSlideshow();
-    coverSlideUrls = [];
+    clearCoverSlideshow(nowCoverState);
+    nowCoverState.slideUrls = [];
     autoSpectrogramActive = false;
     spectrogramVisible = false;
     stopSpectrogram();
-    if (bigCoverEl) bigCoverEl.innerHTML = "";
+    if (nowCoverState?.coverEl) nowCoverState.coverEl.innerHTML = "";
   } else if (albumForCover?.isPlayLater) {
-    clearCoverSlideshow();
-    coverSlideUrls = [];
-    setCoverContent(buildPlayLaterCollageHtml());
+    clearCoverSlideshow(nowCoverState);
+    nowCoverState.slideUrls = [];
+    setCoverContent(nowCoverState, buildPlayLaterCollageHtml());
     if (autoSpectrogramActive && !shouldShowSpectrogram) {
       spectrogramVisible = false;
       stopSpectrogram();
       autoSpectrogramActive = false;
     }
   } else if (coverUrls.length) {
-    renderCoverSlideshow(coverUrls);
+    renderCoverSlideshow(nowCoverState, coverUrls, { loop: true });
     if (autoSpectrogramActive && !shouldShowSpectrogram) {
       spectrogramVisible = false;
       stopSpectrogram();
       autoSpectrogramActive = false;
     }
   } else {
-    clearCoverSlideshow();
-    coverSlideUrls = [];
-    setCoverContent("");
+    clearCoverSlideshow(nowCoverState);
+    nowCoverState.slideUrls = [];
+    setCoverContent(nowCoverState, "");
     autoSpectrogramActive = true;
-    spectrogramVisible = true;
-    startSpectrogram();
+    showSpectrogramForState(nowCoverState);
   }
 
   let activeTrackId = null;
@@ -491,6 +660,67 @@ function updateNowViewUI(track) {
     activeTrackId = track.id;
   }
   renderTracklist(activeTrackId);
+}
+
+function updateTitleViewUI(track) {
+  if (!titleViewEl || !titleCoverState || !titleTrackEl || !titleSubEl) return;
+  if (!track) {
+    titleTrackEl.textContent = "Nothing playing";
+    titleSubEl.textContent = "Pick an album tile";
+    clearCoverSlideshow(titleCoverState);
+    titleCoverState.slideUrls = [];
+    if (titleCoverState.coverEl) titleCoverState.coverEl.innerHTML = "";
+    return;
+  }
+
+  titleTrackEl.textContent = track.title || "Unknown title";
+  titleSubEl.textContent = `${track.artist || "Unknown artist"} • ${track.album || "Unknown album"}`;
+
+  const selectedAlbum = currentAlbumId ? getAlbumById(currentAlbumId) : null;
+  const albumForCover = selectedAlbum || (track?.albumId ? getAlbumById(track.albumId) : null);
+
+  const isAlbumCurrentlyPlaying = albumForCover
+    ? (albumForCover.isPlayLater
+      ? activeQueueAlbumId === PLAY_LATER_ID
+      : activeQueueAlbumId === albumForCover.id)
+    : false;
+
+  const coverUrls = albumForCover?.coverUrls?.length
+    ? albumForCover.coverUrls
+    : (albumForCover?.coverUrl ? [albumForCover.coverUrl] : []);
+  const hasCoverArt = albumForCover?.isPlayLater || coverUrls.length > 0;
+  const shouldShowSpectrogram = !hasCoverArt && isAlbumCurrentlyPlaying;
+  const shouldHideCover = !hasCoverArt && !shouldShowSpectrogram;
+
+  if (titleCoverState.coverEl) {
+    titleCoverState.coverEl.classList.toggle("hidden", shouldHideCover);
+  }
+
+  if (shouldHideCover) {
+    clearCoverSlideshow(titleCoverState);
+    titleCoverState.slideUrls = [];
+    spectrogramVisible = false;
+    stopSpectrogram();
+    if (titleCoverState.coverEl) titleCoverState.coverEl.innerHTML = "";
+  } else if (albumForCover?.isPlayLater) {
+    clearCoverSlideshow(titleCoverState);
+    titleCoverState.slideUrls = [];
+    setCoverContent(titleCoverState, buildPlayLaterCollageHtml());
+    spectrogramVisible = false;
+    stopSpectrogram();
+  } else if (coverUrls.length) {
+    spectrogramVisible = false;
+    stopSpectrogram();
+    renderCoverSlideshow(titleCoverState, coverUrls, {
+      loop: false,
+      spectrogramAfterLast: isAlbumCurrentlyPlaying,
+    });
+  } else {
+    clearCoverSlideshow(titleCoverState);
+    titleCoverState.slideUrls = [];
+    setCoverContent(titleCoverState, "");
+    showSpectrogramForState(titleCoverState);
+  }
 }
 
 function updateAlbumInfoUI(album) {
@@ -523,12 +753,22 @@ audio.addEventListener("timeupdate", () => {
     audio._lastSavedAt = t;
     savePlayerState().catch(()=>{});
   }
+  updateTitleTimeUI();
 });
-audio.addEventListener("pause", () => savePlayerState().catch(()=>{}));
+audio.addEventListener("pause", () => {
+  savePlayerState().catch(()=>{});
+  clearTitleViewAutoOpen();
+});
 audio.addEventListener("play", () => {
   savePlayerState().catch(()=>{});
   resumeAudioContextIfNeeded();
+  lastUserInputAt = Date.now();
+  scheduleTitleViewAutoOpen();
+  updateTitleTimeUI();
 });
+audio.addEventListener("loadedmetadata", updateTitleTimeUI);
+audio.addEventListener("durationchange", updateTitleTimeUI);
+audio.addEventListener("seeked", updateTitleTimeUI);
 window.addEventListener("beforeunload", () => { savePlayerState(); });
 
 // ===== App state =====
@@ -1317,6 +1557,8 @@ function setNowPlayingUI(track) {
     stopSpectrogram();
     updatePlayerVisibility(false);
     updateNowViewUI(null);
+    updateTitleViewUI(null);
+    closeTitleView({ restorePrevious: false });
     return;
   }
   nowTitleEl.textContent = track.title || "Unknown title";
@@ -1326,6 +1568,8 @@ function setNowPlayingUI(track) {
 
   updatePlayerVisibility(true);
   updateNowViewUI(track);
+  updateTitleViewUI(track);
+  updateTitleTimeUI();
 }
 
 // ===== Folder connect / persist across reloads =====
@@ -2110,6 +2354,7 @@ function stopAndReturnToAlbums() {
   currentAlbumId = null;
   activeQueueAlbumId = null;
   setNowPlayingUI(null);
+  closeTitleView({ restorePrevious: false });
   goToAlbumsView();
   setStatus("Playback stopped.");
 }
