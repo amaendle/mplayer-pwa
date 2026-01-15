@@ -109,6 +109,7 @@
       position:relative;
       touch-action: pan-y;
     }
+    .bigCover.hidden { display:none; }
     .coverLayer {
       position:absolute; inset:0;
       display:flex; align-items:center; justify-content:center;
@@ -284,6 +285,13 @@
           <div class="small" id="rebuildModeDesc">Fast rebuild (default)</div>
         </div>
         <button id="btnToggleRebuildMode" class="pill">Fast</button>
+      </div>
+      <div class="modeRow">
+        <div>
+          <div class="small">Library storage</div>
+          <div class="small" id="storageModeDesc">Keep permanent access to picked folders.</div>
+        </div>
+        <button id="btnToggleStorageMode" class="pill">Keep links</button>
       </div>
       <div class="modeRow">
         <div>
