@@ -197,6 +197,7 @@ function goToAlbumsView() {
 function createCoverState(coverEl) {
   return {
     coverEl,
+    baseSize: null,
     slideInterval: null,
     slideTimeout: null,
     slideIndex: 0,
@@ -234,6 +235,7 @@ function setCoverContent(state, html) {
     state.coverEl.appendChild(coverLayer);
   }
   coverLayer.innerHTML = html;
+  state.baseSize = state.coverEl.getBoundingClientRect().width || state.baseSize;
   updateCoverLayerAspect(state);
   ensureSpectrogramCanvas(state.coverEl);
 }
@@ -243,13 +245,29 @@ function updateCoverLayerAspect(state) {
   const coverLayer = state.coverEl.querySelector(".coverLayer");
   if (!coverLayer) return;
   const activeImg = coverLayer.querySelector(".coverSlider img.active") || coverLayer.querySelector("img");
-  if (!activeImg || !activeImg.naturalWidth || !activeImg.naturalHeight) {
-    coverLayer.style.width = "100%";
-    return;
+  coverLayer.style.width = "100%";
+  const ratio = activeImg?.naturalWidth && activeImg?.naturalHeight
+    ? activeImg.naturalWidth / activeImg.naturalHeight
+    : null;
+  updateCoverContainerAspect(state, ratio);
+}
+
+function updateCoverContainerAspect(state, ratio = null) {
+  if (!state?.coverEl) return;
+  const coverEl = state.coverEl;
+  if (!state.baseSize) {
+    state.baseSize = coverEl.getBoundingClientRect().width || 0;
   }
-  const ratio = activeImg.naturalWidth / activeImg.naturalHeight;
-  const widthPercent = ratio < 1 ? Math.max(40, Math.min(100, Math.round(ratio * 100))) : 100;
-  coverLayer.style.width = `${widthPercent}%`;
+  const baseSize = state.baseSize || coverEl.getBoundingClientRect().width || 0;
+  if (!baseSize) return;
+  const maxVw = coverEl.id === "titleCover" ? 0.94 : 0.92;
+  const maxWidth = window.innerWidth * maxVw;
+  const minWidth = baseSize * 0.4;
+  const targetRatio = ratio && Number.isFinite(ratio) ? ratio : 1;
+  const rawWidth = baseSize * targetRatio;
+  const width = Math.min(maxWidth, Math.max(minWidth, rawWidth));
+  coverEl.style.width = `${Math.max(1, Math.round(width))}px`;
+  coverEl.style.height = `${Math.max(1, Math.round(baseSize))}px`;
 }
 
 function showSpectrogramForState(state) {
@@ -568,7 +586,14 @@ function noteUserActivity() {
   document.addEventListener(evt, noteUserActivity, { passive: true });
 });
 
-window.addEventListener("resize", resizeSpectrogramCanvas);
+window.addEventListener("resize", () => {
+  resizeSpectrogramCanvas();
+  [nowCoverState, titleCoverState].forEach((state) => {
+    if (!state?.coverEl) return;
+    state.baseSize = state.coverEl.getBoundingClientRect().width || state.baseSize;
+    updateCoverLayerAspect(state);
+  });
+});
 titlePositionEl?.addEventListener("pointerdown", () => { isTitleSeeking = true; });
 titlePositionEl?.addEventListener("pointerup", () => { isTitleSeeking = false; });
 titlePositionEl?.addEventListener("change", () => { isTitleSeeking = false; });
