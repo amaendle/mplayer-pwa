@@ -208,6 +208,19 @@ function createCoverState(coverEl) {
   };
 }
 
+function measureCoverBaseSize(state) {
+  if (!state?.coverEl) return 0;
+  const coverEl = state.coverEl;
+  const prevWidth = coverEl.style.width;
+  const prevHeight = coverEl.style.height;
+  coverEl.style.width = "";
+  coverEl.style.height = "";
+  const baseSize = coverEl.getBoundingClientRect().width || 0;
+  coverEl.style.width = prevWidth;
+  coverEl.style.height = prevHeight;
+  return baseSize;
+}
+
 function clearCoverSlideshow(state) {
   if (!state) return;
   if (state.slideInterval) {
@@ -235,7 +248,9 @@ function setCoverContent(state, html) {
     state.coverEl.appendChild(coverLayer);
   }
   coverLayer.innerHTML = html;
-  state.baseSize = state.coverEl.getBoundingClientRect().width || state.baseSize;
+  if (!state.baseSize) {
+    state.baseSize = measureCoverBaseSize(state);
+  }
   updateCoverLayerAspect(state);
   ensureSpectrogramCanvas(state.coverEl);
 }
@@ -256,9 +271,9 @@ function updateCoverContainerAspect(state, ratio = null) {
   if (!state?.coverEl) return;
   const coverEl = state.coverEl;
   if (!state.baseSize) {
-    state.baseSize = coverEl.getBoundingClientRect().width || 0;
+    state.baseSize = measureCoverBaseSize(state);
   }
-  const baseSize = state.baseSize || coverEl.getBoundingClientRect().width || 0;
+  const baseSize = state.baseSize || measureCoverBaseSize(state) || 0;
   if (!baseSize) return;
   const maxVw = coverEl.id === "titleCover" ? 0.94 : 0.92;
   const maxWidth = window.innerWidth * maxVw;
@@ -590,7 +605,7 @@ window.addEventListener("resize", () => {
   resizeSpectrogramCanvas();
   [nowCoverState, titleCoverState].forEach((state) => {
     if (!state?.coverEl) return;
-    state.baseSize = state.coverEl.getBoundingClientRect().width || state.baseSize;
+    state.baseSize = measureCoverBaseSize(state) || state.baseSize;
     updateCoverLayerAspect(state);
   });
 });
