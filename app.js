@@ -234,7 +234,22 @@ function setCoverContent(state, html) {
     state.coverEl.appendChild(coverLayer);
   }
   coverLayer.innerHTML = html;
+  updateCoverLayerAspect(state);
   ensureSpectrogramCanvas(state.coverEl);
+}
+
+function updateCoverLayerAspect(state) {
+  if (!state?.coverEl) return;
+  const coverLayer = state.coverEl.querySelector(".coverLayer");
+  if (!coverLayer) return;
+  const activeImg = coverLayer.querySelector(".coverSlider img.active") || coverLayer.querySelector("img");
+  if (!activeImg || !activeImg.naturalWidth || !activeImg.naturalHeight) {
+    coverLayer.style.width = "100%";
+    return;
+  }
+  const ratio = activeImg.naturalWidth / activeImg.naturalHeight;
+  const widthPercent = ratio < 1 ? Math.max(40, Math.min(100, Math.round(ratio * 100))) : 100;
+  coverLayer.style.width = `${widthPercent}%`;
 }
 
 function showSpectrogramForState(state) {
@@ -278,7 +293,17 @@ function renderCoverSlideshow(state, urls, options = {}) {
   state.updateActive = () => {
     const imgs = state.coverEl.querySelectorAll(".coverSlider img");
     imgs.forEach((img, idx) => img.classList.toggle("active", idx === state.slideIndex));
+    updateCoverLayerAspect(state);
   };
+
+  const imgs = state.coverEl.querySelectorAll(".coverSlider img");
+  imgs.forEach((img) => {
+    if (img.complete) {
+      updateCoverLayerAspect(state);
+    } else {
+      img.addEventListener("load", () => updateCoverLayerAspect(state), { once: true });
+    }
+  });
 
   if (state.slideUrls.length <= 1) {
     if (spectrogramAfterLast) {
