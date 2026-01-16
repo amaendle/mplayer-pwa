@@ -96,8 +96,6 @@ const nowAlbumSubEl = document.getElementById("nowAlbumSub");
 let nowCoverState = null;
 let titleCoverState = null;
 let titleViewPreviousState = null;
-let titleViewIdleTimer = null;
-let lastUserInputAt = Date.now();
 let isTitleSeeking = false;
 let spectrogramHostEl = null;
 let currentTrackRequestId = 0;
@@ -119,7 +117,6 @@ const FILE_READ_TIMEOUT_MS = 4000;
 const COVER_SWIPE_THRESHOLD_PX = 28;
 const SPECTROGRAM_TIME_STEP_MS = 25;
 const SPECTROGRAM_FFT_SIZE = 4096;
-const TITLE_VIEW_IDLE_MS = 10000;
 const COVER_SLIDE_DELAY_MS = 3200;
 
 nowAlbumPreviewEl.onclick = () => goToAlbumsView();
@@ -169,7 +166,6 @@ function openTitleView() {
   titleViewPreviousState = {
     nowViewOpen: nowViewEl.classList.contains("open"),
   };
-  clearTitleViewAutoOpen();
   closeNowView();
   titleViewEl.classList.add("open");
   titleViewEl.setAttribute("aria-hidden", "false");
@@ -567,40 +563,6 @@ function resumeAudioContextIfNeeded() {
   }
 }
 
-function clearTitleViewAutoOpen() {
-  if (titleViewIdleTimer) {
-    clearTimeout(titleViewIdleTimer);
-    titleViewIdleTimer = null;
-  }
-}
-
-function scheduleTitleViewAutoOpen() {
-  clearTitleViewAutoOpen();
-  if (!isPlaying || !hasActiveTrack || titleViewEl?.classList.contains("open")) return;
-  const idleFor = Date.now() - lastUserInputAt;
-  if (idleFor >= TITLE_VIEW_IDLE_MS) {
-    openTitleView();
-    return;
-  }
-  titleViewIdleTimer = setTimeout(() => {
-    if (!isPlaying || !hasActiveTrack) return;
-    if (Date.now() - lastUserInputAt >= TITLE_VIEW_IDLE_MS) {
-      openTitleView();
-    } else {
-      scheduleTitleViewAutoOpen();
-    }
-  }, TITLE_VIEW_IDLE_MS - idleFor);
-}
-
-function noteUserActivity() {
-  lastUserInputAt = Date.now();
-  if (isPlaying) scheduleTitleViewAutoOpen();
-}
-
-["pointerdown", "keydown", "touchstart"].forEach((evt) => {
-  document.addEventListener(evt, noteUserActivity, { passive: true });
-});
-
 window.addEventListener("resize", () => {
   resizeSpectrogramCanvas();
   [nowCoverState, titleCoverState].forEach((state) => {
@@ -822,13 +784,11 @@ audio.addEventListener("timeupdate", () => {
 });
 audio.addEventListener("pause", () => {
   savePlayerState().catch(()=>{});
-  clearTitleViewAutoOpen();
 });
 audio.addEventListener("play", () => {
   savePlayerState().catch(()=>{});
   resumeAudioContextIfNeeded();
-  lastUserInputAt = Date.now();
-  scheduleTitleViewAutoOpen();
+  openTitleView();
   updateTitleTimeUI();
 });
 audio.addEventListener("loadedmetadata", updateTitleTimeUI);
