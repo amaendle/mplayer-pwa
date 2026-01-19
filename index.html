@@ -98,7 +98,7 @@
     }
     .nowView.open { display:block; }
     .bigCover {
-      margin-top:14px;
+      margin:14px auto 0;
       width:min(420px, 92vw);
       aspect-ratio:1/1;
       border-radius:22px;
@@ -111,7 +111,11 @@
     }
     .bigCover.hidden { display:none; }
     .coverLayer {
-      position:absolute; inset:0;
+      position:absolute;
+      top:0;
+      bottom:0;
+      left:50%;
+      transform: translateX(-50%);
       display:flex; align-items:center; justify-content:center;
       width:100%; height:100%;
     }
@@ -169,6 +173,61 @@
     .easyPlayer .bigControls button { height:72px; font-size:24px; }
 
     body.easy-access .nowView { padding-bottom:220px; }
+
+    /* Title view mode */
+    .titleView {
+      position:fixed;
+      inset:0;
+      z-index:9;
+      background:var(--bg);
+      display:none;
+      padding:18px 16px 140px;
+      overflow:hidden;
+    }
+    .titleView.open {
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:16px;
+    }
+    .titleView .bigCover {
+      width:min(640px, 94vw);
+      margin-top:12px;
+    }
+    .titleClose {
+      position:absolute;
+      top:12px;
+      right:12px;
+      width:42px;
+      height:42px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:var(--card);
+      color:var(--fg);
+      font-size:20px;
+      cursor:pointer;
+    }
+    .titleMeta { text-align:center; }
+    .titleTrack { font-size:24px; font-weight:750; }
+    .titleSub { color:var(--mut); margin-top:4px; }
+    .titleTimeRow {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      width:min(680px, 94vw);
+      font-variant-numeric: tabular-nums;
+    }
+    .titleTimeRow span { color:var(--mut); font-size:14px; min-width:44px; text-align:center; }
+    .titleTimeRow input[type="range"] {
+      flex:1;
+      accent-color:#7c4dff;
+      height:36px;
+    }
+    .titleControls { width:min(680px, 94vw); }
+    .titleControls button { height:76px; font-size:26px; }
+
+    body.title-view-open .player,
+    body.title-view-open .easyPlayer { display:none !important; }
 
     /* Now Playing album preview strip */
     .nowAlbumPreview {
@@ -319,6 +378,27 @@
     </div>
 
     <div class="tracklist" id="tracklist" aria-label="Album tracklist"></div>
+  </div>
+
+  <!-- Fullscreen Title View -->
+  <div class="titleView" id="titleView" aria-hidden="true">
+    <button class="titleClose" id="btnCloseTitleView" aria-label="Close title view">✕</button>
+    <div class="bigCover" id="titleCover">Cover</div>
+    <div class="titleMeta">
+      <div class="titleTrack" id="titleTrack">Nothing playing</div>
+      <div class="titleSub" id="titleSub">Pick an album tile</div>
+    </div>
+    <div class="titleTimeRow">
+      <span id="titleTimeCurrent">0:00</span>
+      <input type="range" id="titlePosition" min="0" max="0" value="0" step="0.1" aria-label="Playback position">
+      <span id="titleTimeDuration">0:00</span>
+    </div>
+    <div class="bigControls titleControls">
+      <button id="btnTitlePrev">⏮</button>
+      <button id="btnTitlePlay">⏯</button>
+      <button id="btnTitleNext">⏭</button>
+      <button id="btnTitleStop">⏹</button>
+    </div>
   </div>
 
   <div class="easyPlayer" id="easyPlayer" aria-live="polite">
