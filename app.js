@@ -1887,6 +1887,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       let artist = null;
       let albumArtist = null;
       let album = null;
+      let safeDiscNo = 0;
       let safeTrackNo = 0;
       let year = null;
       let coverDataUrlForCache = null;
@@ -1899,6 +1900,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         album = normalizeText(cached.album, "Unknown album");
         const cachedTrackNo = parseInt((cached.trackNo ?? 0).toString(), 10);
         safeTrackNo = Number.isFinite(cachedTrackNo) ? cachedTrackNo : 0;
+        const cachedDiscNo = parseInt((cached.discNo ?? 0).toString(), 10);
+        safeDiscNo = Number.isFinite(cachedDiscNo) ? cachedDiscNo : 0;
         year = parseYear(cached.year);
       } else {
         readCount++;
@@ -1927,6 +1930,9 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         const trackNoRaw = tags?.track; // can be "3/12" or number
         const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
         safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
+        const discNoRaw = tags?.partOfSet ?? tags?.disc ?? tags?.disk ?? tags?.TPOS;
+        const discNo = parseInt((discNoRaw ?? "").toString().split("/")[0], 10);
+        safeDiscNo = Number.isFinite(discNo) ? discNo : 0;
         year = parseYear(tags?.year);
         coverDataUrlForCache = coverDataUrlFromTags(tags);
         coverUrlForAlbum = coverDataUrlForCache || coverUrlFromTags(tags);
@@ -1990,6 +1996,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         albumArtist,
         album,
         albumId,
+        discNo: safeDiscNo,
         trackNo: safeTrackNo,
         year: year || null,
         fileHandle: item.fileHandle,
@@ -1998,7 +2005,16 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       library.tracksById.set(trackId, trackObj);
       library.albumsById.get(albumId).tracks.push(trackId);
 
-      cacheTracks.push({ path: trackObj.path, title, artist, albumArtist, album, trackNo: safeTrackNo, year: year || null });
+      cacheTracks.push({
+        path: trackObj.path,
+        title,
+        artist,
+        albumArtist,
+        album,
+        discNo: safeDiscNo,
+        trackNo: safeTrackNo,
+        year: year || null,
+      });
       if (coverDataUrlForCache && !coversByAlbumKey[albumKey]) coversByAlbumKey[albumKey] = coverDataUrlForCache;
     }
   }
@@ -2054,12 +2070,14 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   // Finalize albums list and sort
   library.albums = Array.from(library.albumsById.values())
     .map(a => {
-      // sort tracks by trackNo then title for usability
+      // sort tracks by discNo then trackNo then title for usability
       a.tracks.sort((id1, id2) => {
         const t1 = library.tracksById.get(id1);
         const t2 = library.tracksById.get(id2);
-        const d = (t1?.trackNo ?? 0) - (t2?.trackNo ?? 0);
-        if (d !== 0) return d;
+        const discDelta = (t1?.discNo ?? 0) - (t2?.discNo ?? 0);
+        if (discDelta !== 0) return discDelta;
+        const trackDelta = (t1?.trackNo ?? 0) - (t2?.trackNo ?? 0);
+        if (trackDelta !== 0) return trackDelta;
         return (t1?.title ?? "").localeCompare(t2?.title ?? "");
       });
       return a;
