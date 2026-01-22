@@ -1521,7 +1521,9 @@ function renderTracklist(activeTrackId) {
     const num = document.createElement("span");
     num.className = "num";
     const trackNumber = track?.trackNo || idx + 1;
-    num.textContent = trackNumber.toString().padStart(2, "0");
+    const discNumber = track?.discNo || 0;
+    const paddedTrackNumber = trackNumber.toString().padStart(2, "0");
+    num.textContent = discNumber ? `${discNumber}-${paddedTrackNumber}` : paddedTrackNumber;
     row.appendChild(num);
 
     const meta = document.createElement("div");
