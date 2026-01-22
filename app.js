@@ -1950,7 +1950,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         const trackNoRaw = tags?.track; // can be "3/12" or number
         const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
         safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
-        discLabel = normalizeDiscLabel(tags?.partOfSet);
+        discLabel = normalizeDiscLabel(tags?.TPOS);
         year = parseYear(tags?.year);
         coverDataUrlForCache = coverDataUrlFromTags(tags);
         coverUrlForAlbum = coverDataUrlForCache || coverUrlFromTags(tags);
