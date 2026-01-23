@@ -1521,7 +1521,9 @@ function renderTracklist(activeTrackId) {
     const num = document.createElement("span");
     num.className = "num";
     const trackNumber = track?.trackNo || idx + 1;
-    num.textContent = trackNumber.toString().padStart(2, "0");
+    const discLabel = normalizeDiscLabel(track?.discNo);
+    const paddedTrackNumber = trackNumber.toString().padStart(2, "0");
+    num.textContent = discLabel ? `${discLabel}-${paddedTrackNumber}` : paddedTrackNumber;
     row.appendChild(num);
 
     const meta = document.createElement("div");
@@ -1791,6 +1793,25 @@ function parseYear(value) {
   return Number.isFinite(yearNum) && yearNum > 0 ? yearNum : null;
 }
 
+function normalizeDiscLabel(value) {
+  if (value == null) return "";
+  const text = value.toString().trim();
+  if (!text) return "";
+  return text.split("/")[0].trim();
+}
+
+function compareDiscLabels(a, b) {
+  const left = normalizeDiscLabel(a);
+  const right = normalizeDiscLabel(b);
+  if (!left && !right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+  const leftIsNumber = /^\d+$/.test(left);
+  const rightIsNumber = /^\d+$/.test(right);
+  if (leftIsNumber && rightIsNumber) return parseInt(left, 10) - parseInt(right, 10);
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
 // ===== Build library =====
 async function scanAndBuildLibraryFromDirs(dirs) {
   // Reset in-memory library (simple MVP). Later we’ll persist metadata + covers.
@@ -1887,6 +1908,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       let artist = null;
       let albumArtist = null;
       let album = null;
+      let discLabel = "";
       let safeTrackNo = 0;
       let year = null;
       let coverDataUrlForCache = null;
@@ -1899,6 +1921,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         album = normalizeText(cached.album, "Unknown album");
         const cachedTrackNo = parseInt((cached.trackNo ?? 0).toString(), 10);
         safeTrackNo = Number.isFinite(cachedTrackNo) ? cachedTrackNo : 0;
+        discLabel = normalizeDiscLabel(cached.discNo);
         year = parseYear(cached.year);
       } else {
         readCount++;
@@ -1927,6 +1950,13 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         const trackNoRaw = tags?.track; // can be "3/12" or number
         const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
         safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
+        const discNoRaw = tags?.TPOS
+          ?? tags?.partOfSet
+          ?? tags?.disc
+          ?? tags?.disk
+          ?? tags?.DISCNUMBER
+          ?? tags?.discnumber;
+        discLabel = normalizeDiscLabel(discNoRaw);
         year = parseYear(tags?.year);
         coverDataUrlForCache = coverDataUrlFromTags(tags);
         coverUrlForAlbum = coverDataUrlForCache || coverUrlFromTags(tags);
@@ -1990,6 +2020,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         albumArtist,
         album,
         albumId,
+        discNo: discLabel,
         trackNo: safeTrackNo,
         year: year || null,
         fileHandle: item.fileHandle,
@@ -1998,7 +2029,16 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       library.tracksById.set(trackId, trackObj);
       library.albumsById.get(albumId).tracks.push(trackId);
 
-      cacheTracks.push({ path: trackObj.path, title, artist, albumArtist, album, trackNo: safeTrackNo, year: year || null });
+      cacheTracks.push({
+        path: trackObj.path,
+        title,
+        artist,
+        albumArtist,
+        album,
+        discNo: discLabel,
+        trackNo: safeTrackNo,
+        year: year || null,
+      });
       if (coverDataUrlForCache && !coversByAlbumKey[albumKey]) coversByAlbumKey[albumKey] = coverDataUrlForCache;
     }
   }
@@ -2054,12 +2094,14 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   // Finalize albums list and sort
   library.albums = Array.from(library.albumsById.values())
     .map(a => {
-      // sort tracks by trackNo then title for usability
+      // sort tracks by disc label then trackNo then title for usability
       a.tracks.sort((id1, id2) => {
         const t1 = library.tracksById.get(id1);
         const t2 = library.tracksById.get(id2);
-        const d = (t1?.trackNo ?? 0) - (t2?.trackNo ?? 0);
-        if (d !== 0) return d;
+        const discDelta = compareDiscLabels(t1?.discNo, t2?.discNo);
+        if (discDelta !== 0) return discDelta;
+        const trackDelta = (t1?.trackNo ?? 0) - (t2?.trackNo ?? 0);
+        if (trackDelta !== 0) return trackDelta;
         return (t1?.title ?? "").localeCompare(t2?.title ?? "");
       });
       return a;
