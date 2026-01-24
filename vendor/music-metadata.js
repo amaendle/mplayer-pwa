@@ -1,16 +1,39 @@
-const MUSIC_METADATA_VERSION = "10.3.2";
-let cachedModule = null;
+let jsMediaTagsPromise = null;
 
-async function loadModule() {
-  if (!cachedModule) {
-    cachedModule = import(`https://cdn.jsdelivr.net/npm/music-metadata@${MUSIC_METADATA_VERSION}/+esm`);
+function loadJsMediaTags() {
+  if (!jsMediaTagsPromise) {
+    jsMediaTagsPromise = import("./jsmediatags.min.js").then(() => window.jsmediatags);
   }
-  return cachedModule;
+  return jsMediaTagsPromise;
 }
 
-export async function parseBlob(file, options = {}) {
-  const module = await loadModule();
-  return module.parseBlob(file, options);
+function toCommonTags(tags) {
+  const picture = tags?.picture
+    ? { data: tags.picture.data, format: tags.picture.format }
+    : null;
+  const disc = tags?.TPOS ?? tags?.discnumber ?? tags?.disk ?? tags?.disc;
+  return {
+    title: tags?.title,
+    artist: tags?.artist,
+    album: tags?.album,
+    albumartist: tags?.albumartist ?? tags?.albumArtist,
+    year: tags?.year,
+    track: tags?.track,
+    disk: disc,
+    picture,
+  };
 }
 
-export { MUSIC_METADATA_VERSION };
+export async function parseBlob(file) {
+  const jsMediaTags = await loadJsMediaTags();
+  return new Promise((resolve, reject) => {
+    if (!jsMediaTags?.read) {
+      reject(new Error("jsmediatags not available"));
+      return;
+    }
+    jsMediaTags.read(file, {
+      onSuccess: (res) => resolve({ common: toCommonTags(res?.tags) }),
+      onError: (err) => reject(err || new Error("tag read error")),
+    });
+  });
+}
