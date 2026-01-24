@@ -165,7 +165,7 @@ function buildCommon(tags, picture) {
     albumartist: tags.albumartist || null,
     year: tags.year || null,
     track: tags.track ? { no: parseInt(tags.track, 10) || null } : null,
-    disk: tags.disc ? { no: parseInt(tags.disc, 10) || null } : null,
+    disk: tags.disc ? tags.disc : null,
     picture: picture ? [picture] : []
   };
   return { common };
