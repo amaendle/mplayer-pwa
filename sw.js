@@ -3,7 +3,6 @@ const ASSETS = [
   "./",
   "./index.html",
   "./app.js",
-  "./vendor/musicmetadata.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png"

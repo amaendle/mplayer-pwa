@@ -1750,7 +1750,16 @@ function isImageName(name) {
   return /\.(jpe?g|png|webp)$/i.test(name);
 }
 
-// ===== Read ID3/FLAC tags using musicmetadata =====
+// ===== Read ID3/FLAC tags using music-metadata =====
+let musicMetadataModulePromise = null;
+
+function loadMusicMetadataModule() {
+  if (!musicMetadataModulePromise) {
+    musicMetadataModulePromise = import("https://cdn.jsdelivr.net/npm/music-metadata@latest/+esm");
+  }
+  return musicMetadataModulePromise;
+}
+
 function normalizeTagValue(value) {
   if (value == null) return "";
   if (typeof value === "object") {
@@ -1785,32 +1794,10 @@ function normalizeMetadataTags(raw) {
 
 function readTagsFromFile(file) {
   return new Promise((resolve) => {
-    const lib = window.musicmetadata;
-    if (!lib) {
-      resolve({ ok: false, reason: "musicmetadata not loaded" });
-      return;
-    }
-
-    if (typeof lib.read === "function") {
-      lib.read(file, {
-        onSuccess: (res) => resolve({ ok: true, tags: normalizeMetadataTags(res?.tags ?? res) }),
-        onError: (err) => resolve({ ok: false, reason: err?.info || "tag read error" }),
-      });
-      return;
-    }
-
-    if (typeof lib === "function") {
-      lib(file, { duration: false }, (err, metadata) => {
-        if (err) {
-          resolve({ ok: false, reason: err?.message || "tag read error" });
-          return;
-        }
-        resolve({ ok: true, tags: normalizeMetadataTags(metadata) });
-      });
-      return;
-    }
-
-    resolve({ ok: false, reason: "musicmetadata not available" });
+    loadMusicMetadataModule()
+      .then((module) => module.parseBlob(file, { duration: false }))
+      .then((metadata) => resolve({ ok: true, tags: normalizeMetadataTags(metadata) }))
+      .catch((err) => resolve({ ok: false, reason: err?.message || "tag read error" }));
   });
 }
 
