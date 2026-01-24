@@ -1755,7 +1755,7 @@ let musicMetadataModulePromise = null;
 
 function loadMusicMetadataModule() {
   if (!musicMetadataModulePromise) {
-    musicMetadataModulePromise = import("https://cdn.jsdelivr.net/npm/music-metadata@latest/+esm");
+    musicMetadataModulePromise = import("./vendor/music-metadata.js");
   }
   return musicMetadataModulePromise;
 }

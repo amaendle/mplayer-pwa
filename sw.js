@@ -1,9 +1,10 @@
 const CACHE = "mp3pwa-v1";
-const MUSIC_METADATA_URL = "https://cdn.jsdelivr.net/npm/music-metadata@latest/+esm";
+const MUSIC_METADATA_URL = "https://cdn.jsdelivr.net/npm/music-metadata@10.3.2/+esm";
 const ASSETS = [
   "./",
   "./index.html",
   "./app.js",
+  "./vendor/music-metadata.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
