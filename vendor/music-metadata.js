@@ -33,7 +33,7 @@ function decodeText(bytes, encoding) {
   return TEXT_DECODER.decode(bytes).replace(/\0/g, "").trim();
 }
 
-function parseId3v2Frames(buffer, offset, size) {
+function parseId3v2Frames(buffer, offset, size, version) {
   const view = new DataView(buffer, offset, size);
   let pos = 0;
   const tags = {};
@@ -46,7 +46,9 @@ function parseId3v2Frames(buffer, offset, size) {
       view.getUint8(pos + 3)
     );
     if (!frameId.trim()) break;
-    const frameSize = readUint32BE(view, pos + 4);
+    const frameSize = version === 4
+      ? readSyncSafeInt(view, pos + 4)
+      : readUint32BE(view, pos + 4);
     if (frameSize <= 0 || pos + 10 + frameSize > size) break;
     const frameData = new Uint8Array(buffer, offset + pos + 10, frameSize);
     if (frameId[0] === "T") {
@@ -145,11 +147,13 @@ function parseId3v1(buffer) {
   const tag = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2));
   if (tag !== "TAG") return null;
   const text = (offset, length) => TEXT_DECODER.decode(new Uint8Array(buffer, buffer.byteLength - 128 + offset, length)).replace(/\0/g, "").trim();
+  const trackByte = view.getUint8(126);
   return {
     title: text(3, 30),
     artist: text(33, 30),
     album: text(63, 30),
-    year: text(93, 4)
+    year: text(93, 4),
+    track: trackByte ? trackByte.toString() : ""
   };
 }
 
@@ -176,8 +180,18 @@ export async function parseBlob(blob) {
   } else {
     const view = new DataView(buffer);
     if (signature[0] === 0x49 && signature[1] === 0x44 && signature[2] === 0x33) {
-      const tagSize = readSyncSafeInt(view, 6);
-      const { tags, picture } = parseId3v2Frames(buffer, 10, tagSize);
+      const majorVersion = view.getUint8(3);
+      const flags = view.getUint8(5);
+      let tagSize = readSyncSafeInt(view, 6);
+      let tagOffset = 10;
+      if (flags & 0x40) {
+        const extendedHeaderSize = majorVersion === 4
+          ? readSyncSafeInt(view, tagOffset)
+          : readUint32BE(view, tagOffset);
+        tagOffset += extendedHeaderSize;
+        tagSize -= extendedHeaderSize;
+      }
+      const { tags, picture } = parseId3v2Frames(buffer, tagOffset, tagSize, majorVersion);
       result = { tags, picture };
     } else {
       const id3v1 = parseId3v1(buffer);
