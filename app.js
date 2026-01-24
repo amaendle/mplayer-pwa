@@ -803,7 +803,7 @@ const MUSIC_DIRS_KEY = "musicDirs";
 
 let library = {
   albums: [],            // [{id,title,artist,coverUrl,tracks:[trackIds]}]
-  tracksById: new Map(), // id -> {id, title, artist, album, trackNo, fileHandle}
+  tracksById: new Map(), // id -> {id, title, artist, album, trackNo, discNumber, fileHandle}
   albumsById: new Map(),
 };
 
@@ -1521,7 +1521,9 @@ function renderTracklist(activeTrackId) {
     const num = document.createElement("span");
     num.className = "num";
     const trackNumber = track?.trackNo || idx + 1;
-    num.textContent = trackNumber.toString().padStart(2, "0");
+    const discLabel = normalizeText(track?.discNumber, "");
+    const trackLabel = trackNumber.toString().padStart(2, "0");
+    num.textContent = discLabel ? `${discLabel}-${trackLabel}` : trackLabel;
     row.appendChild(num);
 
     const meta = document.createElement("div");
@@ -1748,26 +1750,78 @@ function isImageName(name) {
   return /\.(jpe?g|png|webp)$/i.test(name);
 }
 
-// ===== Read ID3 tags using jsmediatags =====
+// ===== Read ID3/FLAC tags using musicmetadata =====
+function normalizeTagValue(value) {
+  if (value == null) return "";
+  if (typeof value === "object") {
+    if (Array.isArray(value)) {
+      return value.map(normalizeTagValue).find(Boolean) || "";
+    }
+    if (typeof value.no === "number" || typeof value.no === "string") return value.no.toString();
+    if (typeof value.number === "number" || typeof value.number === "string") return value.number.toString();
+    if (value.data) return normalizeTagValue(value.data);
+  }
+  return value.toString();
+}
+
+function normalizeMetadataTags(raw) {
+  if (!raw) return {};
+  if (raw.common) {
+    const common = raw.common;
+    const picture = Array.isArray(common.picture) ? common.picture[0] : null;
+    return {
+      title: common.title,
+      artist: common.artist,
+      album: common.album,
+      albumartist: common.albumartist || common.albumArtist,
+      year: common.year || common.date,
+      track: common.track?.no ?? common.track?.number ?? common.track,
+      disc: common.disk?.no ?? common.disk?.number ?? common.disk,
+      picture: picture ? { data: picture.data, format: picture.format } : null,
+    };
+  }
+  return raw;
+}
+
 function readTagsFromFile(file) {
   return new Promise((resolve) => {
-    if (!window.jsmediatags) {
-      resolve({ ok: false, reason: "jsmediatags not loaded" });
+    const lib = window.musicmetadata;
+    if (!lib) {
+      resolve({ ok: false, reason: "musicmetadata not loaded" });
       return;
     }
-    window.jsmediatags.read(file, {
-      onSuccess: (res) => resolve({ ok: true, tags: res.tags }),
-      onError: (err) => resolve({ ok: false, reason: err?.info || "tag read error" }),
-    });
+
+    if (typeof lib.read === "function") {
+      lib.read(file, {
+        onSuccess: (res) => resolve({ ok: true, tags: normalizeMetadataTags(res?.tags ?? res) }),
+        onError: (err) => resolve({ ok: false, reason: err?.info || "tag read error" }),
+      });
+      return;
+    }
+
+    if (typeof lib === "function") {
+      lib(file, { duration: false }, (err, metadata) => {
+        if (err) {
+          resolve({ ok: false, reason: err?.message || "tag read error" });
+          return;
+        }
+        resolve({ ok: true, tags: normalizeMetadataTags(metadata) });
+      });
+      return;
+    }
+
+    resolve({ ok: false, reason: "musicmetadata not available" });
   });
 }
 
 function coverUrlFromTags(tags) {
-  // jsmediatags: tags.picture = { format, data: [byte...] }
+  // picture = { format, data: [byte...] } or { format, data: Uint8Array }
   const pic = tags?.picture;
   if (!pic?.data?.length) return null;
 
-  const bytes = new Uint8Array(pic.data);
+  const bytes = pic.data instanceof Uint8Array
+    ? pic.data
+    : new Uint8Array(pic.data);
   const blob = new Blob([bytes], { type: pic.format || "image/jpeg" });
   return URL.createObjectURL(blob);
 }
@@ -1776,9 +1830,30 @@ function coverDataUrlFromTags(tags) {
   const pic = tags?.picture;
   if (!pic?.data?.length) return null;
   const mime = pic.format || "image/jpeg";
+  const bytes = pic.data instanceof Uint8Array
+    ? pic.data
+    : new Uint8Array(pic.data);
   let binary = "";
-  for (const b of pic.data) binary += String.fromCharCode(b);
+  for (const b of bytes) binary += String.fromCharCode(b);
   return `data:${mime};base64,${btoa(binary)}`;
+}
+
+function getTagValue(tags, keys) {
+  for (const key of keys) {
+    if (tags && tags[key] != null) return tags[key];
+  }
+  return null;
+}
+
+function parseTagNumber(raw) {
+  const text = normalizeTagValue(raw).split("/")[0].trim();
+  const num = parseInt(text, 10);
+  return Number.isFinite(num) ? num : null;
+}
+
+function parseDiscNumber(raw) {
+  const text = normalizeTagValue(raw).split("/")[0].trim();
+  return text || "";
 }
 
 function normalizeText(s, fallback) {
@@ -1888,6 +1963,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       let albumArtist = null;
       let album = null;
       let safeTrackNo = 0;
+      let discNumber = "";
       let year = null;
       let coverDataUrlForCache = null;
       let coverUrlForAlbum = null;
@@ -1899,6 +1975,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         album = normalizeText(cached.album, "Unknown album");
         const cachedTrackNo = parseInt((cached.trackNo ?? 0).toString(), 10);
         safeTrackNo = Number.isFinite(cachedTrackNo) ? cachedTrackNo : 0;
+        discNumber = normalizeText(cached.discNumber, "");
         year = parseYear(cached.year);
       } else {
         readCount++;
@@ -1924,9 +2001,11 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         artist = normalizeText(tags?.artist, "Unknown artist");
         albumArtist = normalizeText(tags?.albumartist ?? tags?.albumArtist, "");
         title = normalizeText(tags?.title, stripAudioExtension(file.name));
-        const trackNoRaw = tags?.track; // can be "3/12" or number
-        const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
+        const trackNoRaw = getTagValue(tags, ["track", "TRACKNUMBER", "TRCK", "trackno", "trackNumber"]);
+        const trackNo = parseTagNumber(trackNoRaw);
         safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
+        const discRaw = getTagValue(tags, ["disc", "disk", "discnumber", "discNumber", "DISCNUMBER", "TPOS", "partOfSet", "disknumber"]);
+        discNumber = parseDiscNumber(discRaw);
         year = parseYear(tags?.year);
         coverDataUrlForCache = coverDataUrlFromTags(tags);
         coverUrlForAlbum = coverDataUrlForCache || coverUrlFromTags(tags);
@@ -1991,6 +2070,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         album,
         albumId,
         trackNo: safeTrackNo,
+        discNumber,
         year: year || null,
         fileHandle: item.fileHandle,
       };
@@ -1998,7 +2078,16 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       library.tracksById.set(trackId, trackObj);
       library.albumsById.get(albumId).tracks.push(trackId);
 
-      cacheTracks.push({ path: trackObj.path, title, artist, albumArtist, album, trackNo: safeTrackNo, year: year || null });
+      cacheTracks.push({
+        path: trackObj.path,
+        title,
+        artist,
+        albumArtist,
+        album,
+        trackNo: safeTrackNo,
+        discNumber,
+        year: year || null,
+      });
       if (coverDataUrlForCache && !coversByAlbumKey[albumKey]) coversByAlbumKey[albumKey] = coverDataUrlForCache;
     }
   }
@@ -2054,10 +2143,27 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   // Finalize albums list and sort
   library.albums = Array.from(library.albumsById.values())
     .map(a => {
-      // sort tracks by trackNo then title for usability
+      // sort tracks by disc + trackNo then title for usability
       a.tracks.sort((id1, id2) => {
         const t1 = library.tracksById.get(id1);
         const t2 = library.tracksById.get(id2);
+        const disc1 = parseDiscNumber(t1?.discNumber);
+        const disc2 = parseDiscNumber(t2?.discNumber);
+        const disc1Num = parseTagNumber(disc1);
+        const disc2Num = parseTagNumber(disc2);
+        if (disc1 || disc2) {
+          if (Number.isFinite(disc1Num) && Number.isFinite(disc2Num)) {
+            const discDelta = disc1Num - disc2Num;
+            if (discDelta !== 0) return discDelta;
+          } else if (Number.isFinite(disc1Num)) {
+            return -1;
+          } else if (Number.isFinite(disc2Num)) {
+            return 1;
+          } else {
+            const discDelta = disc1.localeCompare(disc2);
+            if (discDelta !== 0) return discDelta;
+          }
+        }
         const d = (t1?.trackNo ?? 0) - (t2?.trackNo ?? 0);
         if (d !== 0) return d;
         return (t1?.title ?? "").localeCompare(t2?.title ?? "");
