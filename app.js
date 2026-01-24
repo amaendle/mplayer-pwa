@@ -1834,13 +1834,15 @@ function getTagValue(tags, keys) {
 
 function parseTagNumber(raw) {
   const text = normalizeTagValue(raw).split("/")[0].trim();
-  const num = parseInt(text, 10);
+  const match = text.match(/\d+/);
+  const num = match ? parseInt(match[0], 10) : NaN;
   return Number.isFinite(num) ? num : null;
 }
 
 function parseDiscNumber(raw) {
   const text = normalizeTagValue(raw).split("/")[0].trim();
-  return text || "";
+  if (!text || text === "[object Object]") return "";
+  return text;
 }
 
 function normalizeText(s, fallback) {
