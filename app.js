@@ -1496,6 +1496,25 @@ function renderTracklist(activeTrackId) {
     return;
   }
 
+  let allTracksShareNumericDisc = true;
+  let numericDiscLabel = null;
+  for (const trackId of album.tracks) {
+    const track = library.tracksById.get(trackId);
+    const discLabel = normalizeText(track?.discNumber, "");
+    if (!discLabel || !/^\d+$/.test(discLabel)) {
+      allTracksShareNumericDisc = false;
+      numericDiscLabel = null;
+      break;
+    }
+    if (numericDiscLabel === null) {
+      numericDiscLabel = discLabel;
+    } else if (numericDiscLabel !== discLabel) {
+      allTracksShareNumericDisc = false;
+      numericDiscLabel = null;
+      break;
+    }
+  }
+
   album.tracks.forEach((trackId, idx) => {
     const track = library.tracksById.get(trackId);
     const row = document.createElement("div");
@@ -1523,7 +1542,7 @@ function renderTracklist(activeTrackId) {
     const trackNumber = track?.trackNo || idx + 1;
     const discLabel = normalizeText(track?.discNumber, "");
     const trackLabel = trackNumber.toString().padStart(2, "0");
-    if (!discLabel) {
+    if (!discLabel || allTracksShareNumericDisc) {
       num.textContent = trackLabel;
     } else if (/^\d+$/.test(discLabel)) {
       num.textContent = `${discLabel}-${trackLabel}`;
