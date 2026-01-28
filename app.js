@@ -1523,7 +1523,16 @@ function renderTracklist(activeTrackId) {
     const trackNumber = track?.trackNo || idx + 1;
     const discLabel = normalizeText(track?.discNumber, "");
     const trackLabel = trackNumber.toString().padStart(2, "0");
-    num.textContent = discLabel ? `${discLabel}-${trackLabel}` : trackLabel;
+    if (!discLabel) {
+      num.textContent = trackLabel;
+    } else if (/^\d+$/.test(discLabel)) {
+      num.textContent = `${discLabel}-${trackLabel}`;
+    } else {
+      num.textContent = "";
+      num.appendChild(document.createTextNode(discLabel));
+      num.appendChild(document.createElement("br"));
+      num.appendChild(document.createTextNode(trackLabel));
+    }
     row.appendChild(num);
 
     const meta = document.createElement("div");
