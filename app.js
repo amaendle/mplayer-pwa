@@ -1523,7 +1523,16 @@ function renderTracklist(activeTrackId) {
     const trackNumber = track?.trackNo || idx + 1;
     const discLabel = normalizeText(track?.discNumber, "");
     const trackLabel = trackNumber.toString().padStart(2, "0");
-    num.textContent = discLabel ? `${discLabel}-${trackLabel}` : trackLabel;
+    if (!discLabel) {
+      num.textContent = trackLabel;
+    } else if (/^\d+$/.test(discLabel)) {
+      num.textContent = `${discLabel}-${trackLabel}`;
+    } else {
+      num.textContent = "";
+      num.appendChild(document.createTextNode(discLabel));
+      num.appendChild(document.createElement("br"));
+      num.appendChild(document.createTextNode(trackLabel));
+    }
     row.appendChild(num);
 
     const meta = document.createElement("div");
@@ -1834,13 +1843,15 @@ function getTagValue(tags, keys) {
 
 function parseTagNumber(raw) {
   const text = normalizeTagValue(raw).split("/")[0].trim();
-  const num = parseInt(text, 10);
+  const match = text.match(/\d+/);
+  const num = match ? parseInt(match[0], 10) : NaN;
   return Number.isFinite(num) ? num : null;
 }
 
 function parseDiscNumber(raw) {
   const text = normalizeTagValue(raw).split("/")[0].trim();
-  return text || "";
+  if (!text || text === "[object Object]") return "";
+  return text;
 }
 
 function normalizeText(s, fallback) {
