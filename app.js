@@ -598,6 +598,18 @@ async function getFileWithTimeout(fileHandle, timeoutMs = FILE_READ_TIMEOUT_MS) 
   ]);
 }
 
+async function getFileFromItem(item, timeoutMs = FILE_READ_TIMEOUT_MS) {
+  try {
+    return await getFileWithTimeout(item.fileHandle, timeoutMs);
+  } catch (err) {
+    if (err?.name === "NotFoundError" && item?.parent && item?.name) {
+      const freshHandle = await item.parent.getFileHandle(item.name, { create: false });
+      return await getFileWithTimeout(freshHandle, timeoutMs);
+    }
+    throw err;
+  }
+}
+
 function getActiveTrack() {
   const activeTrackId = queue[queueIndex] ?? null;
   return activeTrackId ? library.tracksById.get(activeTrackId) : null;
@@ -1651,11 +1663,16 @@ async function importDirectoryOnce(handle) {
     }
 
     const destFileHandle = await ensureOpfsFileHandle(libraryDir, destPath);
-    const srcFile = await item.fileHandle.getFile();
-    const writable = await destFileHandle.createWritable();
-    await srcFile.stream().pipeTo(writable);
-    importedPaths.add(destPath);
-    copiedCount++;
+    try {
+      const srcFile = await getFileFromItem(item);
+      const writable = await destFileHandle.createWritable();
+      await srcFile.stream().pipeTo(writable);
+      importedPaths.add(destPath);
+      copiedCount++;
+    } catch (err) {
+      console.warn("Could not import file:", item.path, err);
+      skippedCount++;
+    }
   }
 
   await persistOpfsImportedPaths(importedPaths);
@@ -1759,8 +1776,16 @@ async function reconnectFolder() {
 async function* walkDirectory(dir, path = "") {
   for await (const entry of dir.values()) {
     const entryPath = path ? `${path}/${entry.name}` : entry.name;
-    if (entry.kind === "file") yield { fileHandle: entry, path: entryPath };
-    else if (entry.kind === "directory") yield* walkDirectory(entry, entryPath);
+    if (entry.kind === "file") {
+      yield {
+        fileHandle: entry,
+        path: entryPath,
+        name: entry.name,
+        parent: dir,
+      };
+    } else if (entry.kind === "directory") {
+      yield* walkDirectory(entry, entryPath);
+    }
   }
 }
 
@@ -1958,7 +1983,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         const fullPath = `${pathPrefix}${item.path}`;
         const folderPath = folderPathFor(fullPath);
         const list = albumImagesByFolder.get(folderPath) || [];
-        list.push({ path: fullPath, fileHandle: item.fileHandle });
+        list.push({ ...item, path: fullPath });
         albumImagesByFolder.set(folderPath, list);
         continue;
       }
@@ -2004,7 +2029,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
         let file;
         try {
-          file = await getFileWithTimeout(item.fileHandle);
+          file = await getFileFromItem(item);
         } catch (e) {
           console.warn("Could not open file:", item.path, e);
           if (e.name === "TimeoutError") setStatus("A file is temporarily unavailable (network timeout). Skipping…");
@@ -2090,6 +2115,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         discNumber,
         year: year || null,
         fileHandle: item.fileHandle,
+        name: item.name,
+        parent: item.parent,
       };
 
       library.tracksById.set(trackId, trackObj);
@@ -2122,7 +2149,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       const images = albumImagesByFolder.get(folderPath) || [];
       for (const image of images) {
         try {
-          const file = await getFileWithTimeout(image.fileHandle);
+          const file = await getFileFromItem(image);
           const url = URL.createObjectURL(file);
           if (!seen.has(url)) {
             seen.add(url);
@@ -2515,7 +2542,7 @@ async function playTrackById(trackId) {
   // Recreate a fresh object URL each time (safe across reloads)
   let file;
   try {
-    file = await getFileWithTimeout(track.fileHandle, FILE_READ_TIMEOUT_MS);
+    file = await getFileFromItem(track, FILE_READ_TIMEOUT_MS);
   } catch (err) {
     if (loadRequestId !== currentTrackRequestId) return; // superseded
     console.warn("Could not open track file:", track.path, err);
