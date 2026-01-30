@@ -1714,7 +1714,7 @@ async function connectFolder() {
       await idbSet("musicDirConnectedAt", Date.now());
       libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
       setStatus("Folder added. Scanning music…");
-      await scanAndBuildLibraryFromDirs(dirHandles);
+      await scanAndBuildLibraryFromDirs(dirHandles, { keepExistingIfEmpty: true });
     }
   } catch (e) {
     console.warn(e);
@@ -1819,11 +1819,46 @@ function normalizeTagValue(value) {
     if (Array.isArray(value)) {
       return value.map(normalizeTagValue).find(Boolean) || "";
     }
+    if (value instanceof Uint8Array) return decodeTagBytes(value);
+    if (value instanceof ArrayBuffer) return decodeTagBytes(new Uint8Array(value));
+    if (ArrayBuffer.isView(value)) {
+      return decodeTagBytes(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    }
     if (typeof value.no === "number" || typeof value.no === "string") return value.no.toString();
     if (typeof value.number === "number" || typeof value.number === "string") return value.number.toString();
     if (value.data) return normalizeTagValue(value.data);
   }
   return value.toString();
+}
+
+function decodeTagBytes(bytes) {
+  if (!bytes?.length) return "";
+  if (bytes.length >= 2) {
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+      return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+    }
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+      return new TextDecoder("utf-16be").decode(bytes.subarray(2));
+    }
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return new TextDecoder("utf-8").decode(bytes.subarray(3));
+  }
+
+  let evenNulls = 0;
+  let oddNulls = 0;
+  for (let i = 0; i < bytes.length; i += 1) {
+    if (bytes[i] === 0) {
+      if (i % 2 === 0) evenNulls += 1;
+      else oddNulls += 1;
+    }
+  }
+  if (evenNulls + oddNulls > 0) {
+    const encoding = oddNulls >= evenNulls ? "utf-16le" : "utf-16be";
+    return new TextDecoder(encoding).decode(bytes);
+  }
+
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 function normalizeMetadataTags(raw) {
@@ -1909,13 +1944,9 @@ function parseYear(value) {
 }
 
 // ===== Build library =====
-async function scanAndBuildLibraryFromDirs(dirs) {
-  // Reset in-memory library (simple MVP). Later we’ll persist metadata + covers.
-  library = {
-    albums: [],
-    tracksById: new Map(),
-    albumsById: new Map(),
-  };
+async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false } = {}) {
+  const previousLibrary = library;
+  const previousAlbumCount = previousLibrary?.albums?.length || 0;
 
   // Release old cover URLs to avoid memory leaks
   // (only safe because we rebuild from scratch)
@@ -1924,6 +1955,46 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
   const albumKeyToAlbumId = new Map();
   const cacheTracks = [];
+
+  let audioCount = 0;
+  let readCount = 0;
+  let processedCount = 0;
+  const sourceLabel = libraryImportMode === IMPORT_MODE_OPFS
+    ? "imported library"
+    : `${dirs.length} folder(s)`;
+
+  // First pass: count audio files quickly for nicer progress across all folders
+  for (const dir of dirs) {
+    for await (const item of walkDirectory(dir)) {
+      if (isAudioName(item.path)) audioCount++;
+    }
+  }
+
+  if (audioCount === 0) {
+    const statusMessage = `No MP3 or FLAC files found in ${sourceLabel}.`;
+    if (keepExistingIfEmpty && previousAlbumCount) {
+      setStatus(`${statusMessage} Keeping existing library.`);
+    } else {
+      library = {
+        albums: [],
+        tracksById: new Map(),
+        albumsById: new Map(),
+      };
+      setStatus(statusMessage);
+      libInfoEl.textContent = libraryImportMode === IMPORT_MODE_OPFS
+        ? "Imported library is empty. Tap Add Music to import files."
+        : "Connected, but no MP3/FLAC files found.";
+      renderAlbums([]);
+    }
+    return;
+  }
+
+  // Reset in-memory library (simple MVP). Later we’ll persist metadata + covers.
+  library = {
+    albums: [],
+    tracksById: new Map(),
+    albumsById: new Map(),
+  };
 
   const { tracks: cachedTracks, coversByAlbumKey: cachedCovers } = fastRebuildEnabled
     ? await loadLibraryCache()
@@ -1942,29 +2013,6 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   const albumKeysByFolder = new Map();
 
   const directoryLabels = buildDirectoryLabels(dirs);
-
-  let audioCount = 0;
-  let readCount = 0;
-  let processedCount = 0;
-  const sourceLabel = libraryImportMode === IMPORT_MODE_OPFS
-    ? "imported library"
-    : `${dirs.length} folder(s)`;
-
-  // First pass: count audio files quickly for nicer progress across all folders
-  for (const dir of dirs) {
-    for await (const item of walkDirectory(dir)) {
-      if (isAudioName(item.path)) audioCount++;
-    }
-  }
-
-  if (audioCount === 0) {
-    setStatus(`No MP3 or FLAC files found in ${sourceLabel}.`);
-    libInfoEl.textContent = libraryImportMode === IMPORT_MODE_OPFS
-      ? "Imported library is empty. Tap Add Music to import files."
-      : "Connected, but no MP3/FLAC files found.";
-    renderAlbums([]);
-    return;
-  }
 
   if (canUseCache) {
     setStatus(`Fast rebuild: restoring saved tags for ${audioCount} track(s). New files will be fully scanned.`);
