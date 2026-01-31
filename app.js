@@ -1264,6 +1264,30 @@ async function persistDirectories(handles) {
   await idbSet(MUSIC_DIRS_KEY, handles);
 }
 
+async function isSameEntry(handle, list) {
+  for (const other of list) {
+    if (handle === other) return true;
+    if (handle?.isSameEntry) {
+      try {
+        if (await handle.isSameEntry(other)) return true;
+      } catch (err) {
+        console.warn("Could not compare directory handles:", err);
+      }
+    }
+  }
+  return false;
+}
+
+async function uniqueHandles(handles) {
+  const unique = [];
+  for (const handle of handles) {
+    if (!handle) continue;
+    if (await isSameEntry(handle, unique)) continue;
+    unique.push(handle);
+  }
+  return unique;
+}
+
 // ===== Rendering =====
 function getAlbumCoverUrl(albumId) {
   const album = albumId ? library.albumsById.get(albumId) : null;
@@ -1701,16 +1725,27 @@ async function connectFolder() {
       const skippedMsg = skippedCount ? ` Skipped ${skippedCount} duplicate file(s).` : "";
       setStatus(`Imported ${copiedCount} new file(s) into OPFS.${skippedMsg}`);
     } else {
-      const saved = await loadSavedDirectories();
+      const saved = await uniqueHandles(await loadSavedDirectories());
       const granted = [];
       for (const h of saved) {
         let perm = await h.queryPermission({ mode: "read" });
         if (perm !== "granted") perm = await h.requestPermission({ mode: "read" });
         if (perm === "granted") granted.push(h);
       }
+      const alreadySaved = await isSameEntry(handle, saved);
+      if (alreadySaved) {
+        dirHandles = granted;
+        await persistDirectories(saved);
+        await idbSet("musicDirConnectedAt", Date.now());
+        libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
+        setStatus("Folder already connected. Scanning music…");
+        await scanAndBuildLibraryFromDirs(dirHandles, { keepExistingIfEmpty: true });
+        return;
+      }
 
       dirHandles = [...granted, handle];
-      await persistDirectories([...saved, handle]);
+      const updatedSaved = [...saved, handle];
+      await persistDirectories(updatedSaved);
       await idbSet("musicDirConnectedAt", Date.now());
       libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
       setStatus("Folder added. Scanning music…");
@@ -1743,7 +1778,7 @@ async function reconnectFolder() {
     return;
   }
 
-  const saved = await loadSavedDirectories();
+  const saved = await uniqueHandles(await loadSavedDirectories());
   if (!saved.length) {
     setStatus("No saved folders yet. Click “Add Music”.");
     return;
@@ -1978,10 +2013,15 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
     ? "imported library"
     : `${dirs.length} folder(s)`;
 
+  const seenFileHandles = [];
+
   // First pass: count audio files quickly for nicer progress across all folders
   for (const dir of dirs) {
     for await (const item of walkDirectory(dir)) {
-      if (isAudioName(item.path)) audioCount++;
+      if (!isAudioName(item.path)) continue;
+      if (await isSameEntry(item.fileHandle, seenFileHandles)) continue;
+      seenFileHandles.push(item.fileHandle);
+      audioCount++;
     }
   }
 
@@ -2038,11 +2078,14 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
   }
 
   // Second pass: read tags + build albums
+  seenFileHandles.length = 0;
   for (const [dirIdx, dir] of dirs.entries()) {
     const pathPrefix = dirs.length > 1 ? `${directoryLabels[dirIdx]}:` : "";
 
     for await (const item of walkDirectory(dir)) {
       if (isImageName(item.path)) {
+        if (await isSameEntry(item.fileHandle, seenFileHandles)) continue;
+        seenFileHandles.push(item.fileHandle);
         const fullPath = `${pathPrefix}${item.path}`;
         const folderPath = folderPathFor(fullPath);
         const list = albumImagesByFolder.get(folderPath) || [];
@@ -2052,6 +2095,8 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
       }
 
       if (!isAudioName(item.path)) continue;
+      if (await isSameEntry(item.fileHandle, seenFileHandles)) continue;
+      seenFileHandles.push(item.fileHandle);
 
       processedCount++;
       const fullPath = `${pathPrefix}${item.path}`;
