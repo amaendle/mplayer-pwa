@@ -1784,7 +1784,21 @@ async function* walkDirectory(dir, path = "") {
         parent: dir,
       };
     } else if (entry.kind === "directory") {
-      yield* walkDirectory(entry, entryPath);
+      try {
+        yield* walkDirectory(entry, entryPath);
+      } catch (err) {
+        if (err?.name === "NotFoundError") {
+          try {
+            const freshDir = await dir.getDirectoryHandle(entry.name, { create: false });
+            yield* walkDirectory(freshDir, entryPath);
+            continue;
+          } catch (retryErr) {
+            console.warn("Could not enter subfolder:", entryPath, retryErr);
+          }
+        } else {
+          console.warn("Could not enter subfolder:", entryPath, err);
+        }
+      }
     }
   }
 }
