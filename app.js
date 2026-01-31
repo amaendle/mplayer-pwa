@@ -1948,8 +1948,9 @@ function parseDiscNumber(raw) {
 }
 
 function normalizeText(s, fallback) {
-  s = (s ?? "").toString().trim();
-  return s.length ? s : fallback;
+  const normalized = normalizeTagValue(s);
+  const trimmed = (normalized ?? "").toString().trim();
+  return trimmed.length ? trimmed : fallback;
 }
 
 function parseYear(value) {
