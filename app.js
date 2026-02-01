@@ -1214,6 +1214,19 @@ function pathVariants(path) {
   return [...variants];
 }
 
+function isPathDuplicate(path, seenPaths) {
+  for (const variant of pathVariants(path)) {
+    if (seenPaths.has(variant)) return true;
+  }
+  return false;
+}
+
+function markPathSeen(path, seenPaths) {
+  for (const variant of pathVariants(path)) {
+    seenPaths.add(variant);
+  }
+}
+
 function folderPathFor(fullPath) {
   const slashIdx = fullPath.lastIndexOf("/");
   if (slashIdx >= 0) return fullPath.slice(0, slashIdx);
@@ -2013,14 +2026,17 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
     ? "imported library"
     : `${dirs.length} folder(s)`;
 
-  const seenFileHandles = [];
+  const directoryLabels = buildDirectoryLabels(dirs);
+  const seenPaths = new Set();
 
   // First pass: count audio files quickly for nicer progress across all folders
-  for (const dir of dirs) {
+  for (const [dirIdx, dir] of dirs.entries()) {
+    const pathPrefix = dirs.length > 1 ? `${directoryLabels[dirIdx]}:` : "";
     for await (const item of walkDirectory(dir)) {
       if (!isAudioName(item.path)) continue;
-      if (await isSameEntry(item.fileHandle, seenFileHandles)) continue;
-      seenFileHandles.push(item.fileHandle);
+      const fullPath = `${pathPrefix}${item.path}`;
+      if (isPathDuplicate(fullPath, seenPaths)) continue;
+      markPathSeen(fullPath, seenPaths);
       audioCount++;
     }
   }
@@ -2067,8 +2083,6 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
   const albumImagesByFolder = new Map();
   const albumKeysByFolder = new Map();
 
-  const directoryLabels = buildDirectoryLabels(dirs);
-
   if (canUseCache) {
     setStatus(`Fast rebuild: restoring saved tags for ${audioCount} track(s). New files will be fully scanned.`);
   } else if (fastRebuildEnabled) {
@@ -2078,15 +2092,15 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
   }
 
   // Second pass: read tags + build albums
-  seenFileHandles.length = 0;
+  seenPaths.clear();
   for (const [dirIdx, dir] of dirs.entries()) {
     const pathPrefix = dirs.length > 1 ? `${directoryLabels[dirIdx]}:` : "";
 
     for await (const item of walkDirectory(dir)) {
       if (isImageName(item.path)) {
-        if (await isSameEntry(item.fileHandle, seenFileHandles)) continue;
-        seenFileHandles.push(item.fileHandle);
         const fullPath = `${pathPrefix}${item.path}`;
+        if (isPathDuplicate(fullPath, seenPaths)) continue;
+        markPathSeen(fullPath, seenPaths);
         const folderPath = folderPathFor(fullPath);
         const list = albumImagesByFolder.get(folderPath) || [];
         list.push({ ...item, path: fullPath });
@@ -2095,11 +2109,11 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
       }
 
       if (!isAudioName(item.path)) continue;
-      if (await isSameEntry(item.fileHandle, seenFileHandles)) continue;
-      seenFileHandles.push(item.fileHandle);
 
-      processedCount++;
       const fullPath = `${pathPrefix}${item.path}`;
+      if (isPathDuplicate(fullPath, seenPaths)) continue;
+      markPathSeen(fullPath, seenPaths);
+      processedCount++;
       const cached = canUseCache ? (cachedByPath.get(fullPath)
         || pathVariants(fullPath).map(v => cachedByVariant.get(v)).find(Boolean)) : null;
 
