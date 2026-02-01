@@ -230,6 +230,51 @@
     body.title-view-open .player,
     body.title-view-open .easyPlayer { display:none !important; }
 
+    .coverGalleryView {
+      position:fixed;
+      inset:0;
+      z-index:12;
+      background:rgba(10,10,12,.92);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:24px 16px;
+    }
+    .coverGalleryView.open { display:flex; }
+    .coverGalleryInner {
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:16px;
+      width:min(900px, 94vw);
+    }
+    .coverGalleryImage {
+      width:100%;
+      max-height:75vh;
+      object-fit:contain;
+      border-radius:18px;
+      background:#1b1b22;
+      border:1px solid var(--line);
+    }
+    .coverGalleryControls {
+      display:flex;
+      gap:12px;
+    }
+    .coverGalleryControls button { height:56px; font-size:22px; }
+    .coverGalleryClose {
+      position:absolute;
+      top:16px;
+      right:16px;
+      width:44px;
+      height:44px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:var(--card);
+      color:var(--fg);
+      font-size:20px;
+      cursor:pointer;
+    }
+
     /* Now Playing album preview strip */
     .nowAlbumPreview {
       margin-top:12px;
@@ -399,6 +444,17 @@
       <button id="btnTitlePlay">⏯</button>
       <button id="btnTitleNext">⏭</button>
       <button id="btnTitleStop">⏹</button>
+    </div>
+  </div>
+
+  <div class="coverGalleryView" id="coverGallery" aria-hidden="true">
+    <button class="coverGalleryClose" id="btnCloseCoverGallery" aria-label="Close cover gallery">✕</button>
+    <div class="coverGalleryInner">
+      <img class="coverGalleryImage" id="coverGalleryImage" alt="Album cover">
+      <div class="coverGalleryControls">
+        <button type="button" id="btnCoverGalleryPrev">◀</button>
+        <button type="button" id="btnCoverGalleryNext">▶</button>
+      </div>
     </div>
   </div>
 

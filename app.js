@@ -53,6 +53,11 @@ const titleSubEl = document.getElementById("titleSub");
 const titleTimeCurrentEl = document.getElementById("titleTimeCurrent");
 const titleTimeDurationEl = document.getElementById("titleTimeDuration");
 const titlePositionEl = document.getElementById("titlePosition");
+const coverGalleryEl = document.getElementById("coverGallery");
+const coverGalleryImageEl = document.getElementById("coverGalleryImage");
+const coverGalleryPrevEl = document.getElementById("btnCoverGalleryPrev");
+const coverGalleryNextEl = document.getElementById("btnCoverGalleryNext");
+const coverGalleryCloseEl = document.getElementById("btnCloseCoverGallery");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
@@ -85,6 +90,12 @@ document.getElementById("btnTitlePlay")?.addEventListener("click", playPause);
 document.getElementById("btnTitleNext")?.addEventListener("click", next);
 document.getElementById("btnTitleStop")?.addEventListener("click", stopAndReturnToAlbums);
 document.getElementById("btnCloseTitleView")?.addEventListener("click", closeTitleView);
+coverGalleryPrevEl?.addEventListener("click", () => stepCoverGallery(-1));
+coverGalleryNextEl?.addEventListener("click", () => stepCoverGallery(1));
+coverGalleryCloseEl?.addEventListener("click", closeCoverGallery);
+coverGalleryEl?.addEventListener("click", (e) => {
+  if (e.target === coverGalleryEl) closeCoverGallery();
+});
 
 const nowViewEl = document.getElementById("nowView");
 const bigCoverEl = document.getElementById("bigCover");
@@ -92,9 +103,16 @@ const nowAlbumPreviewEl = document.getElementById("nowAlbumPreview");
 const tracklistEl = document.getElementById("tracklist");
 const nowAlbumTitleEl = document.getElementById("nowAlbumTitle");
 const nowAlbumSubEl = document.getElementById("nowAlbumSub");
+bigCoverEl?.addEventListener("click", () => {
+  if (currentCoverGalleryUrls.length) {
+    openCoverGallery(currentCoverGalleryUrls, currentCoverGalleryIndex);
+  }
+});
 
 let nowCoverState = null;
 let titleCoverState = null;
+let currentCoverGalleryUrls = [];
+let currentCoverGalleryIndex = 0;
 let titleViewPreviousState = null;
 let isTitleSeeking = false;
 let spectrogramHostEl = null;
@@ -201,6 +219,7 @@ function createCoverState(coverEl) {
     slideUrls: [],
     updateActive: () => {},
     swipeStart: null,
+    allowSpectrogram: coverEl?.id === "titleCover",
   };
 }
 
@@ -248,7 +267,9 @@ function setCoverContent(state, html) {
     state.baseSize = measureCoverBaseSize(state);
   }
   updateCoverLayerAspect(state);
-  ensureSpectrogramCanvas(state.coverEl);
+  if (state.allowSpectrogram) {
+    ensureSpectrogramCanvas(state.coverEl);
+  }
 }
 
 function updateCoverLayerAspect(state) {
@@ -401,7 +422,48 @@ function bindCoverInteractions(state) {
     state.swipeStart = null;
     pauseCoverSlideshow(state, false);
   });
-  coverEl.addEventListener("click", toggleSpectrogramMode);
+  if (state.allowSpectrogram) {
+    coverEl.addEventListener("click", toggleSpectrogramMode);
+  }
+}
+
+function renderCoverStatic(state, url) {
+  if (!state?.coverEl) return;
+  clearCoverSlideshow(state);
+  state.slideUrls = url ? [url] : [];
+  if (!url) {
+    setCoverContent(state, "Cover");
+    return;
+  }
+  setCoverContent(state, `<img alt="" src="${url}" style="width:100%;height:100%;object-fit:cover;display:block;">`);
+  updateCoverLayerAspect(state);
+}
+
+function openCoverGallery(urls, startIndex = 0) {
+  const galleryEl = document.getElementById("coverGallery");
+  const imgEl = document.getElementById("coverGalleryImage");
+  if (!galleryEl || !imgEl) return;
+  currentCoverGalleryUrls = Array.isArray(urls) ? urls.filter(Boolean) : [];
+  if (!currentCoverGalleryUrls.length) return;
+  currentCoverGalleryIndex = Math.min(Math.max(startIndex, 0), currentCoverGalleryUrls.length - 1);
+  imgEl.src = currentCoverGalleryUrls[currentCoverGalleryIndex];
+  galleryEl.classList.add("open");
+  galleryEl.setAttribute("aria-hidden", "false");
+}
+
+function closeCoverGallery() {
+  const galleryEl = document.getElementById("coverGallery");
+  if (!galleryEl) return;
+  galleryEl.classList.remove("open");
+  galleryEl.setAttribute("aria-hidden", "true");
+}
+
+function stepCoverGallery(step) {
+  const imgEl = document.getElementById("coverGalleryImage");
+  if (!imgEl || !currentCoverGalleryUrls.length) return;
+  currentCoverGalleryIndex = (currentCoverGalleryIndex + step + currentCoverGalleryUrls.length)
+    % currentCoverGalleryUrls.length;
+  imgEl.src = currentCoverGalleryUrls[currentCoverGalleryIndex];
 }
 
 function ensureSpectrogramCanvas(hostEl = spectrogramHostEl) {
@@ -651,8 +713,8 @@ function updateNowViewUI(track) {
     ? albumForCover.coverUrls
     : (albumForCover?.coverUrl ? [albumForCover.coverUrl] : []);
   const hasCoverArt = albumForCover?.isPlayLater || coverUrls.length > 0;
-  const shouldShowSpectrogram = !hasCoverArt && isAlbumCurrentlyPlaying;
-  const shouldHideCover = !hasCoverArt && !shouldShowSpectrogram;
+  const shouldShowSpectrogram = false;
+  const shouldHideCover = false;
 
   if (nowCoverState?.coverEl) {
     nowCoverState.coverEl.classList.toggle("hidden", shouldHideCover);
@@ -669,24 +731,27 @@ function updateNowViewUI(track) {
     clearCoverSlideshow(nowCoverState);
     nowCoverState.slideUrls = [];
     setCoverContent(nowCoverState, buildPlayLaterCollageHtml());
-    if (autoSpectrogramActive && !shouldShowSpectrogram) {
-      spectrogramVisible = false;
-      stopSpectrogram();
-      autoSpectrogramActive = false;
-    }
+    autoSpectrogramActive = false;
+    spectrogramVisible = false;
+    stopSpectrogram();
+    currentCoverGalleryUrls = [];
+    currentCoverGalleryIndex = 0;
   } else if (coverUrls.length) {
-    renderCoverSlideshow(nowCoverState, coverUrls, { loop: true });
-    if (autoSpectrogramActive && !shouldShowSpectrogram) {
-      spectrogramVisible = false;
-      stopSpectrogram();
-      autoSpectrogramActive = false;
-    }
+    renderCoverStatic(nowCoverState, coverUrls[0]);
+    autoSpectrogramActive = false;
+    spectrogramVisible = false;
+    stopSpectrogram();
+    currentCoverGalleryUrls = coverUrls;
+    currentCoverGalleryIndex = 0;
   } else {
     clearCoverSlideshow(nowCoverState);
     nowCoverState.slideUrls = [];
-    setCoverContent(nowCoverState, "");
-    autoSpectrogramActive = true;
-    showSpectrogramForState(nowCoverState);
+    setCoverContent(nowCoverState, "Cover");
+    autoSpectrogramActive = false;
+    spectrogramVisible = false;
+    stopSpectrogram();
+    currentCoverGalleryUrls = [];
+    currentCoverGalleryIndex = 0;
   }
 
   let activeTrackId = null;
