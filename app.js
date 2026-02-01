@@ -2254,7 +2254,8 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
       const folderAlbums = albumKeysByFolder.get(folderPath);
       if (!folderAlbums || !folderAlbums.has(album.albumKey)) continue;
 
-      const images = albumImagesByFolder.get(folderPath) || [];
+      const images = [...(albumImagesByFolder.get(folderPath) || [])]
+        .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
       for (const image of images) {
         try {
           const file = await getFileFromItem(image);
