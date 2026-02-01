@@ -255,12 +255,24 @@
       border-radius:18px;
       background:#1b1b22;
       border:1px solid var(--line);
+      touch-action:pan-y;
     }
     .coverGalleryControls {
       display:flex;
       gap:12px;
+      position:fixed;
+      left:0;
+      right:0;
+      bottom:24px;
+      justify-content:center;
+      padding:0 16px;
     }
-    .coverGalleryControls button { height:56px; font-size:22px; }
+    .coverGalleryControls button {
+      height:72px;
+      min-width:72px;
+      font-size:28px;
+      border-radius:18px;
+    }
     .coverGalleryClose {
       position:absolute;
       top:16px;

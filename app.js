@@ -58,6 +58,7 @@ const coverGalleryImageEl = document.getElementById("coverGalleryImage");
 const coverGalleryPrevEl = document.getElementById("btnCoverGalleryPrev");
 const coverGalleryNextEl = document.getElementById("btnCoverGalleryNext");
 const coverGalleryCloseEl = document.getElementById("btnCloseCoverGallery");
+const coverGallerySwipeTargetEl = document.getElementById("coverGalleryImage");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
@@ -95,6 +96,22 @@ coverGalleryNextEl?.addEventListener("click", () => stepCoverGallery(1));
 coverGalleryCloseEl?.addEventListener("click", closeCoverGallery);
 coverGalleryEl?.addEventListener("click", (e) => {
   if (e.target === coverGalleryEl) closeCoverGallery();
+});
+coverGallerySwipeTargetEl?.addEventListener("pointerdown", (e) => {
+  coverGallerySwipeTargetEl.setPointerCapture?.(e.pointerId);
+  coverGallerySwipeTargetEl.dataset.swipeStartX = `${e.clientX}`;
+  coverGallerySwipeTargetEl.dataset.swipeStartY = `${e.clientY}`;
+});
+coverGallerySwipeTargetEl?.addEventListener("pointerup", (e) => {
+  const startX = parseFloat(coverGallerySwipeTargetEl.dataset.swipeStartX || "0");
+  const startY = parseFloat(coverGallerySwipeTargetEl.dataset.swipeStartY || "0");
+  const dx = e.clientX - startX;
+  const dy = e.clientY - startY;
+  coverGallerySwipeTargetEl.dataset.swipeStartX = "";
+  coverGallerySwipeTargetEl.dataset.swipeStartY = "";
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > COVER_SWIPE_THRESHOLD_PX) {
+    stepCoverGallery(dx > 0 ? -1 : 1);
+  }
 });
 
 const nowViewEl = document.getElementById("nowView");
