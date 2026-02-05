@@ -162,10 +162,14 @@ bindCoverInteractions(nowCoverState);
 bindCoverInteractions(titleCoverState);
 
 // Open big now-playing when user taps the bottom bar text area
-document.querySelector(".player .now").onclick = () => openNowViewForCurrentPlayback();
+document.querySelector(".player .now").onclick = () => {
+  openNowViewForCurrentPlayback();
+  openTitleView();
+};
 easyPlayerEl?.addEventListener("click", (e) => {
   if (e.target.closest(".bigControls")) return;
   openNowViewForCurrentPlayback();
+  openTitleView();
 });
 
 // Add open/close + UI update
