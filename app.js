@@ -758,7 +758,11 @@ function updateNowViewUI(track) {
     currentCoverGalleryUrls = [];
     currentCoverGalleryIndex = 0;
   } else if (coverUrls.length) {
-    renderCoverStatic(nowCoverState, coverUrls[0]);
+    setCoverContent(nowCoverState, `
+      <div class="coverStrip">
+        ${coverUrls.map((url) => `<img alt="" src="${url}">`).join("")}
+      </div>
+    `);
     autoSpectrogramActive = false;
     spectrogramVisible = false;
     stopSpectrogram();
