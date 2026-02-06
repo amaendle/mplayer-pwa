@@ -760,7 +760,7 @@ function updateNowViewUI(track) {
   } else if (coverUrls.length) {
     setCoverContent(nowCoverState, `
       <div class="coverStrip">
-        ${coverUrls.map((url) => `<img alt="" src="${url}">`).join("")}
+        ${coverUrls.map((url, idx) => `<img alt="" src="${url}" data-cover-index="${idx}">`).join("")}
       </div>
     `);
     autoSpectrogramActive = false;
@@ -768,6 +768,15 @@ function updateNowViewUI(track) {
     stopSpectrogram();
     currentCoverGalleryUrls = coverUrls;
     currentCoverGalleryIndex = 0;
+    const coverImages = nowCoverState?.coverEl?.querySelectorAll(".coverStrip img") || [];
+    coverImages.forEach((img) => {
+      img.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const idx = parseInt(img.dataset.coverIndex || "0", 10);
+        currentCoverGalleryIndex = Number.isFinite(idx) ? idx : 0;
+        openCoverGallery(currentCoverGalleryUrls, currentCoverGalleryIndex);
+      });
+    });
   } else {
     clearCoverSlideshow(nowCoverState);
     nowCoverState.slideUrls = [];
