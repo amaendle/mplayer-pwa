@@ -99,7 +99,7 @@
     .nowView.open { display:block; }
     .bigCover {
       margin:14px auto 0;
-      width:min(420px, 92vw);
+      width:min(900px, 96vw);
       aspect-ratio:1/1;
       border-radius:22px;
       overflow:hidden;
@@ -130,13 +130,16 @@
       overflow-x:auto;
       overflow-y:hidden;
       box-sizing:border-box;
+      scrollbar-width:none;
+      -ms-overflow-style:none;
     }
+    .bigCover .coverStrip::-webkit-scrollbar { display:none; }
     .bigCover .coverStrip img {
-      width:calc(50% - 4px);
+      width:auto;
       height:100%;
       flex:0 0 auto;
       aspect-ratio:1/1;
-      object-fit:cover;
+      object-fit:contain;
       border-radius:12px;
     }
 
