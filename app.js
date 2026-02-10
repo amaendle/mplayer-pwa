@@ -565,7 +565,8 @@ function resumeAudioContextIfNeeded() {
 
 window.addEventListener("resize", () => {
   resizeSpectrogramCanvas();
-  [nowCoverState, titleCoverState].forEach((state) => {
+  //nowCoverState, 
+  [titleCoverState].forEach((state) => {
     if (!state?.coverEl) return;
     state.baseSize = measureCoverBaseSize(state) || state.baseSize;
     updateCoverLayerAspect(state);
