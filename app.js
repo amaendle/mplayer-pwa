@@ -53,6 +53,12 @@ const titleSubEl = document.getElementById("titleSub");
 const titleTimeCurrentEl = document.getElementById("titleTimeCurrent");
 const titleTimeDurationEl = document.getElementById("titleTimeDuration");
 const titlePositionEl = document.getElementById("titlePosition");
+const coverGalleryEl = document.getElementById("coverGallery");
+const coverGalleryImageEl = document.getElementById("coverGalleryImage");
+const coverGalleryPrevEl = document.getElementById("btnCoverGalleryPrev");
+const coverGalleryNextEl = document.getElementById("btnCoverGalleryNext");
+const coverGalleryCloseEl = document.getElementById("btnCloseCoverGallery");
+const coverGallerySwipeTargetEl = document.getElementById("coverGalleryImage");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
@@ -85,6 +91,28 @@ document.getElementById("btnTitlePlay")?.addEventListener("click", playPause);
 document.getElementById("btnTitleNext")?.addEventListener("click", next);
 document.getElementById("btnTitleStop")?.addEventListener("click", stopAndReturnToAlbums);
 document.getElementById("btnCloseTitleView")?.addEventListener("click", closeTitleView);
+coverGalleryPrevEl?.addEventListener("click", () => stepCoverGallery(-1));
+coverGalleryNextEl?.addEventListener("click", () => stepCoverGallery(1));
+coverGalleryCloseEl?.addEventListener("click", closeCoverGallery);
+coverGalleryEl?.addEventListener("click", (e) => {
+  if (e.target === coverGalleryEl) closeCoverGallery();
+});
+coverGallerySwipeTargetEl?.addEventListener("pointerdown", (e) => {
+  coverGallerySwipeTargetEl.setPointerCapture?.(e.pointerId);
+  coverGallerySwipeTargetEl.dataset.swipeStartX = `${e.clientX}`;
+  coverGallerySwipeTargetEl.dataset.swipeStartY = `${e.clientY}`;
+});
+coverGallerySwipeTargetEl?.addEventListener("pointerup", (e) => {
+  const startX = parseFloat(coverGallerySwipeTargetEl.dataset.swipeStartX || "0");
+  const startY = parseFloat(coverGallerySwipeTargetEl.dataset.swipeStartY || "0");
+  const dx = e.clientX - startX;
+  const dy = e.clientY - startY;
+  coverGallerySwipeTargetEl.dataset.swipeStartX = "";
+  coverGallerySwipeTargetEl.dataset.swipeStartY = "";
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > COVER_SWIPE_THRESHOLD_PX) {
+    stepCoverGallery(dx > 0 ? -1 : 1);
+  }
+});
 
 const nowViewEl = document.getElementById("nowView");
 const bigCoverEl = document.getElementById("bigCover");
@@ -92,9 +120,16 @@ const nowAlbumPreviewEl = document.getElementById("nowAlbumPreview");
 const tracklistEl = document.getElementById("tracklist");
 const nowAlbumTitleEl = document.getElementById("nowAlbumTitle");
 const nowAlbumSubEl = document.getElementById("nowAlbumSub");
+bigCoverEl?.addEventListener("click", () => {
+  if (currentCoverGalleryUrls.length) {
+    openCoverGallery(currentCoverGalleryUrls, currentCoverGalleryIndex);
+  }
+});
 
 let nowCoverState = null;
 let titleCoverState = null;
+let currentCoverGalleryUrls = [];
+let currentCoverGalleryIndex = 0;
 let titleViewPreviousState = null;
 let isTitleSeeking = false;
 let spectrogramHostEl = null;
@@ -127,10 +162,14 @@ bindCoverInteractions(nowCoverState);
 bindCoverInteractions(titleCoverState);
 
 // Open big now-playing when user taps the bottom bar text area
-document.querySelector(".player .now").onclick = () => openNowViewForCurrentPlayback();
+document.querySelector(".player .now").onclick = () => {
+  openNowViewForCurrentPlayback();
+  openTitleView();
+};
 easyPlayerEl?.addEventListener("click", (e) => {
   if (e.target.closest(".bigControls")) return;
   openNowViewForCurrentPlayback();
+  openTitleView();
 });
 
 // Add open/close + UI update
@@ -201,6 +240,7 @@ function createCoverState(coverEl) {
     slideUrls: [],
     updateActive: () => {},
     swipeStart: null,
+    allowSpectrogram: coverEl?.id === "titleCover",
   };
 }
 
@@ -248,7 +288,9 @@ function setCoverContent(state, html) {
     state.baseSize = measureCoverBaseSize(state);
   }
   updateCoverLayerAspect(state);
-  ensureSpectrogramCanvas(state.coverEl);
+  if (state.allowSpectrogram) {
+    ensureSpectrogramCanvas(state.coverEl);
+  }
 }
 
 function updateCoverLayerAspect(state) {
@@ -401,7 +443,48 @@ function bindCoverInteractions(state) {
     state.swipeStart = null;
     pauseCoverSlideshow(state, false);
   });
-  coverEl.addEventListener("click", toggleSpectrogramMode);
+  if (state.allowSpectrogram) {
+    coverEl.addEventListener("click", toggleSpectrogramMode);
+  }
+}
+
+function renderCoverStatic(state, url) {
+  if (!state?.coverEl) return;
+  clearCoverSlideshow(state);
+  state.slideUrls = url ? [url] : [];
+  if (!url) {
+    setCoverContent(state, "Cover");
+    return;
+  }
+  setCoverContent(state, `<img alt="" src="${url}" style="width:100%;height:100%;object-fit:cover;display:block;">`);
+  updateCoverLayerAspect(state);
+}
+
+function openCoverGallery(urls, startIndex = 0) {
+  const galleryEl = document.getElementById("coverGallery");
+  const imgEl = document.getElementById("coverGalleryImage");
+  if (!galleryEl || !imgEl) return;
+  currentCoverGalleryUrls = Array.isArray(urls) ? urls.filter(Boolean) : [];
+  if (!currentCoverGalleryUrls.length) return;
+  currentCoverGalleryIndex = Math.min(Math.max(startIndex, 0), currentCoverGalleryUrls.length - 1);
+  imgEl.src = currentCoverGalleryUrls[currentCoverGalleryIndex];
+  galleryEl.classList.add("open");
+  galleryEl.setAttribute("aria-hidden", "false");
+}
+
+function closeCoverGallery() {
+  const galleryEl = document.getElementById("coverGallery");
+  if (!galleryEl) return;
+  galleryEl.classList.remove("open");
+  galleryEl.setAttribute("aria-hidden", "true");
+}
+
+function stepCoverGallery(step) {
+  const imgEl = document.getElementById("coverGalleryImage");
+  if (!imgEl || !currentCoverGalleryUrls.length) return;
+  currentCoverGalleryIndex = (currentCoverGalleryIndex + step + currentCoverGalleryUrls.length)
+    % currentCoverGalleryUrls.length;
+  imgEl.src = currentCoverGalleryUrls[currentCoverGalleryIndex];
 }
 
 function ensureSpectrogramCanvas(hostEl = spectrogramHostEl) {
@@ -598,6 +681,18 @@ async function getFileWithTimeout(fileHandle, timeoutMs = FILE_READ_TIMEOUT_MS) 
   ]);
 }
 
+async function getFileFromItem(item, timeoutMs = FILE_READ_TIMEOUT_MS) {
+  try {
+    return await getFileWithTimeout(item.fileHandle, timeoutMs);
+  } catch (err) {
+    if (err?.name === "NotFoundError" && item?.parent && item?.name) {
+      const freshHandle = await item.parent.getFileHandle(item.name, { create: false });
+      return await getFileWithTimeout(freshHandle, timeoutMs);
+    }
+    throw err;
+  }
+}
+
 function getActiveTrack() {
   const activeTrackId = queue[queueIndex] ?? null;
   return activeTrackId ? library.tracksById.get(activeTrackId) : null;
@@ -639,8 +734,8 @@ function updateNowViewUI(track) {
     ? albumForCover.coverUrls
     : (albumForCover?.coverUrl ? [albumForCover.coverUrl] : []);
   const hasCoverArt = albumForCover?.isPlayLater || coverUrls.length > 0;
-  const shouldShowSpectrogram = !hasCoverArt && isAlbumCurrentlyPlaying;
-  const shouldHideCover = !hasCoverArt && !shouldShowSpectrogram;
+  const shouldShowSpectrogram = false;
+  const shouldHideCover = false;
 
   if (nowCoverState?.coverEl) {
     nowCoverState.coverEl.classList.toggle("hidden", shouldHideCover);
@@ -657,24 +752,40 @@ function updateNowViewUI(track) {
     clearCoverSlideshow(nowCoverState);
     nowCoverState.slideUrls = [];
     setCoverContent(nowCoverState, buildPlayLaterCollageHtml());
-    if (autoSpectrogramActive && !shouldShowSpectrogram) {
-      spectrogramVisible = false;
-      stopSpectrogram();
-      autoSpectrogramActive = false;
-    }
+    autoSpectrogramActive = false;
+    spectrogramVisible = false;
+    stopSpectrogram();
+    currentCoverGalleryUrls = [];
+    currentCoverGalleryIndex = 0;
   } else if (coverUrls.length) {
-    renderCoverSlideshow(nowCoverState, coverUrls, { loop: true });
-    if (autoSpectrogramActive && !shouldShowSpectrogram) {
-      spectrogramVisible = false;
-      stopSpectrogram();
-      autoSpectrogramActive = false;
-    }
+    setCoverContent(nowCoverState, `
+      <div class="coverStrip">
+        ${coverUrls.map((url, idx) => `<img alt="" src="${url}" data-cover-index="${idx}">`).join("")}
+      </div>
+    `);
+    autoSpectrogramActive = false;
+    spectrogramVisible = false;
+    stopSpectrogram();
+    currentCoverGalleryUrls = coverUrls;
+    currentCoverGalleryIndex = 0;
+    const coverImages = nowCoverState?.coverEl?.querySelectorAll(".coverStrip img") || [];
+    coverImages.forEach((img) => {
+      img.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const idx = parseInt(img.dataset.coverIndex || "0", 10);
+        currentCoverGalleryIndex = Number.isFinite(idx) ? idx : 0;
+        openCoverGallery(currentCoverGalleryUrls, currentCoverGalleryIndex);
+      });
+    });
   } else {
     clearCoverSlideshow(nowCoverState);
     nowCoverState.slideUrls = [];
-    setCoverContent(nowCoverState, "");
-    autoSpectrogramActive = true;
-    showSpectrogramForState(nowCoverState);
+    setCoverContent(nowCoverState, "Cover");
+    autoSpectrogramActive = false;
+    spectrogramVisible = false;
+    stopSpectrogram();
+    currentCoverGalleryUrls = [];
+    currentCoverGalleryIndex = 0;
   }
 
   let activeTrackId = null;
@@ -1202,6 +1313,19 @@ function pathVariants(path) {
   return [...variants];
 }
 
+function isPathDuplicate(path, seenPaths) {
+  for (const variant of pathVariants(path)) {
+    if (seenPaths.has(variant)) return true;
+  }
+  return false;
+}
+
+function markPathSeen(path, seenPaths) {
+  for (const variant of pathVariants(path)) {
+    seenPaths.add(variant);
+  }
+}
+
 function folderPathFor(fullPath) {
   const slashIdx = fullPath.lastIndexOf("/");
   if (slashIdx >= 0) return fullPath.slice(0, slashIdx);
@@ -1250,6 +1374,30 @@ async function loadSavedDirectories() {
 
 async function persistDirectories(handles) {
   await idbSet(MUSIC_DIRS_KEY, handles);
+}
+
+async function isSameEntry(handle, list) {
+  for (const other of list) {
+    if (handle === other) return true;
+    if (handle?.isSameEntry) {
+      try {
+        if (await handle.isSameEntry(other)) return true;
+      } catch (err) {
+        console.warn("Could not compare directory handles:", err);
+      }
+    }
+  }
+  return false;
+}
+
+async function uniqueHandles(handles) {
+  const unique = [];
+  for (const handle of handles) {
+    if (!handle) continue;
+    if (await isSameEntry(handle, unique)) continue;
+    unique.push(handle);
+  }
+  return unique;
 }
 
 // ===== Rendering =====
@@ -1651,11 +1799,16 @@ async function importDirectoryOnce(handle) {
     }
 
     const destFileHandle = await ensureOpfsFileHandle(libraryDir, destPath);
-    const srcFile = await item.fileHandle.getFile();
-    const writable = await destFileHandle.createWritable();
-    await srcFile.stream().pipeTo(writable);
-    importedPaths.add(destPath);
-    copiedCount++;
+    try {
+      const srcFile = await getFileFromItem(item);
+      const writable = await destFileHandle.createWritable();
+      await srcFile.stream().pipeTo(writable);
+      importedPaths.add(destPath);
+      copiedCount++;
+    } catch (err) {
+      console.warn("Could not import file:", item.path, err);
+      skippedCount++;
+    }
   }
 
   await persistOpfsImportedPaths(importedPaths);
@@ -1684,20 +1837,31 @@ async function connectFolder() {
       const skippedMsg = skippedCount ? ` Skipped ${skippedCount} duplicate file(s).` : "";
       setStatus(`Imported ${copiedCount} new file(s) into OPFS.${skippedMsg}`);
     } else {
-      const saved = await loadSavedDirectories();
+      const saved = await uniqueHandles(await loadSavedDirectories());
       const granted = [];
       for (const h of saved) {
         let perm = await h.queryPermission({ mode: "read" });
         if (perm !== "granted") perm = await h.requestPermission({ mode: "read" });
         if (perm === "granted") granted.push(h);
       }
+      const alreadySaved = await isSameEntry(handle, saved);
+      if (alreadySaved) {
+        dirHandles = granted;
+        await persistDirectories(saved);
+        await idbSet("musicDirConnectedAt", Date.now());
+        libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
+        setStatus("Folder already connected. Scanning music…");
+        await scanAndBuildLibraryFromDirs(dirHandles, { keepExistingIfEmpty: true });
+        return;
+      }
 
       dirHandles = [...granted, handle];
-      await persistDirectories([...saved, handle]);
+      const updatedSaved = [...saved, handle];
+      await persistDirectories(updatedSaved);
       await idbSet("musicDirConnectedAt", Date.now());
       libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
       setStatus("Folder added. Scanning music…");
-      await scanAndBuildLibraryFromDirs(dirHandles);
+      await scanAndBuildLibraryFromDirs(dirHandles, { keepExistingIfEmpty: true });
     }
   } catch (e) {
     console.warn(e);
@@ -1726,7 +1890,7 @@ async function reconnectFolder() {
     return;
   }
 
-  const saved = await loadSavedDirectories();
+  const saved = await uniqueHandles(await loadSavedDirectories());
   if (!saved.length) {
     setStatus("No saved folders yet. Click “Add Music”.");
     return;
@@ -1759,8 +1923,30 @@ async function reconnectFolder() {
 async function* walkDirectory(dir, path = "") {
   for await (const entry of dir.values()) {
     const entryPath = path ? `${path}/${entry.name}` : entry.name;
-    if (entry.kind === "file") yield { fileHandle: entry, path: entryPath };
-    else if (entry.kind === "directory") yield* walkDirectory(entry, entryPath);
+    if (entry.kind === "file") {
+      yield {
+        fileHandle: entry,
+        path: entryPath,
+        name: entry.name,
+        parent: dir,
+      };
+    } else if (entry.kind === "directory") {
+      try {
+        yield* walkDirectory(entry, entryPath);
+      } catch (err) {
+        if (err?.name === "NotFoundError") {
+          try {
+            const freshDir = await dir.getDirectoryHandle(entry.name, { create: false });
+            yield* walkDirectory(freshDir, entryPath);
+            continue;
+          } catch (retryErr) {
+            console.warn("Could not enter subfolder:", entryPath, retryErr);
+          }
+        } else {
+          console.warn("Could not enter subfolder:", entryPath, err);
+        }
+      }
+    }
   }
 }
 
@@ -1794,11 +1980,46 @@ function normalizeTagValue(value) {
     if (Array.isArray(value)) {
       return value.map(normalizeTagValue).find(Boolean) || "";
     }
+    if (value instanceof Uint8Array) return decodeTagBytes(value);
+    if (value instanceof ArrayBuffer) return decodeTagBytes(new Uint8Array(value));
+    if (ArrayBuffer.isView(value)) {
+      return decodeTagBytes(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    }
     if (typeof value.no === "number" || typeof value.no === "string") return value.no.toString();
     if (typeof value.number === "number" || typeof value.number === "string") return value.number.toString();
     if (value.data) return normalizeTagValue(value.data);
   }
   return value.toString();
+}
+
+function decodeTagBytes(bytes) {
+  if (!bytes?.length) return "";
+  if (bytes.length >= 2) {
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+      return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+    }
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+      return new TextDecoder("utf-16be").decode(bytes.subarray(2));
+    }
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return new TextDecoder("utf-8").decode(bytes.subarray(3));
+  }
+
+  let evenNulls = 0;
+  let oddNulls = 0;
+  for (let i = 0; i < bytes.length; i += 1) {
+    if (bytes[i] === 0) {
+      if (i % 2 === 0) evenNulls += 1;
+      else oddNulls += 1;
+    }
+  }
+  if (evenNulls + oddNulls > 0) {
+    const encoding = oddNulls >= evenNulls ? "utf-16le" : "utf-16be";
+    return new TextDecoder(encoding).decode(bytes);
+  }
+
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 function normalizeMetadataTags(raw) {
@@ -1874,8 +2095,9 @@ function parseDiscNumber(raw) {
 }
 
 function normalizeText(s, fallback) {
-  s = (s ?? "").toString().trim();
-  return s.length ? s : fallback;
+  const normalized = normalizeTagValue(s);
+  const trimmed = (normalized ?? "").toString().trim();
+  return trimmed.length ? trimmed : fallback;
 }
 
 function parseYear(value) {
@@ -1884,13 +2106,9 @@ function parseYear(value) {
 }
 
 // ===== Build library =====
-async function scanAndBuildLibraryFromDirs(dirs) {
-  // Reset in-memory library (simple MVP). Later we’ll persist metadata + covers.
-  library = {
-    albums: [],
-    tracksById: new Map(),
-    albumsById: new Map(),
-  };
+async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false } = {}) {
+  const previousLibrary = library;
+  const previousAlbumCount = previousLibrary?.albums?.length || 0;
 
   // Release old cover URLs to avoid memory leaks
   // (only safe because we rebuild from scratch)
@@ -1899,6 +2117,54 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
   const albumKeyToAlbumId = new Map();
   const cacheTracks = [];
+
+  let audioCount = 0;
+  let readCount = 0;
+  let processedCount = 0;
+  const sourceLabel = libraryImportMode === IMPORT_MODE_OPFS
+    ? "imported library"
+    : `${dirs.length} folder(s)`;
+
+  const directoryLabels = buildDirectoryLabels(dirs);
+  const seenPaths = new Set();
+
+  // First pass: count audio files quickly for nicer progress across all folders
+  for (const [dirIdx, dir] of dirs.entries()) {
+    const pathPrefix = dirs.length > 1 ? `${directoryLabels[dirIdx]}:` : "";
+    for await (const item of walkDirectory(dir)) {
+      if (!isAudioName(item.path)) continue;
+      const fullPath = `${pathPrefix}${item.path}`;
+      if (isPathDuplicate(fullPath, seenPaths)) continue;
+      markPathSeen(fullPath, seenPaths);
+      audioCount++;
+    }
+  }
+
+  if (audioCount === 0) {
+    const statusMessage = `No MP3 or FLAC files found in ${sourceLabel}.`;
+    if (keepExistingIfEmpty && previousAlbumCount) {
+      setStatus(`${statusMessage} Keeping existing library.`);
+    } else {
+      library = {
+        albums: [],
+        tracksById: new Map(),
+        albumsById: new Map(),
+      };
+      setStatus(statusMessage);
+      libInfoEl.textContent = libraryImportMode === IMPORT_MODE_OPFS
+        ? "Imported library is empty. Tap Add Music to import files."
+        : "Connected, but no MP3/FLAC files found.";
+      renderAlbums([]);
+    }
+    return;
+  }
+
+  // Reset in-memory library (simple MVP). Later we’ll persist metadata + covers.
+  library = {
+    albums: [],
+    tracksById: new Map(),
+    albumsById: new Map(),
+  };
 
   const { tracks: cachedTracks, coversByAlbumKey: cachedCovers } = fastRebuildEnabled
     ? await loadLibraryCache()
@@ -1916,31 +2182,6 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   const albumImagesByFolder = new Map();
   const albumKeysByFolder = new Map();
 
-  const directoryLabels = buildDirectoryLabels(dirs);
-
-  let audioCount = 0;
-  let readCount = 0;
-  let processedCount = 0;
-  const sourceLabel = libraryImportMode === IMPORT_MODE_OPFS
-    ? "imported library"
-    : `${dirs.length} folder(s)`;
-
-  // First pass: count audio files quickly for nicer progress across all folders
-  for (const dir of dirs) {
-    for await (const item of walkDirectory(dir)) {
-      if (isAudioName(item.path)) audioCount++;
-    }
-  }
-
-  if (audioCount === 0) {
-    setStatus(`No MP3 or FLAC files found in ${sourceLabel}.`);
-    libInfoEl.textContent = libraryImportMode === IMPORT_MODE_OPFS
-      ? "Imported library is empty. Tap Add Music to import files."
-      : "Connected, but no MP3/FLAC files found.";
-    renderAlbums([]);
-    return;
-  }
-
   if (canUseCache) {
     setStatus(`Fast rebuild: restoring saved tags for ${audioCount} track(s). New files will be fully scanned.`);
   } else if (fastRebuildEnabled) {
@@ -1950,23 +2191,28 @@ async function scanAndBuildLibraryFromDirs(dirs) {
   }
 
   // Second pass: read tags + build albums
+  seenPaths.clear();
   for (const [dirIdx, dir] of dirs.entries()) {
     const pathPrefix = dirs.length > 1 ? `${directoryLabels[dirIdx]}:` : "";
 
     for await (const item of walkDirectory(dir)) {
       if (isImageName(item.path)) {
         const fullPath = `${pathPrefix}${item.path}`;
+        if (isPathDuplicate(fullPath, seenPaths)) continue;
+        markPathSeen(fullPath, seenPaths);
         const folderPath = folderPathFor(fullPath);
         const list = albumImagesByFolder.get(folderPath) || [];
-        list.push({ path: fullPath, fileHandle: item.fileHandle });
+        list.push({ ...item, path: fullPath });
         albumImagesByFolder.set(folderPath, list);
         continue;
       }
 
       if (!isAudioName(item.path)) continue;
 
-      processedCount++;
       const fullPath = `${pathPrefix}${item.path}`;
+      if (isPathDuplicate(fullPath, seenPaths)) continue;
+      markPathSeen(fullPath, seenPaths);
+      processedCount++;
       const cached = canUseCache ? (cachedByPath.get(fullPath)
         || pathVariants(fullPath).map(v => cachedByVariant.get(v)).find(Boolean)) : null;
 
@@ -2004,7 +2250,7 @@ async function scanAndBuildLibraryFromDirs(dirs) {
 
         let file;
         try {
-          file = await getFileWithTimeout(item.fileHandle);
+          file = await getFileFromItem(item);
         } catch (e) {
           console.warn("Could not open file:", item.path, e);
           if (e.name === "TimeoutError") setStatus("A file is temporarily unavailable (network timeout). Skipping…");
@@ -2090,6 +2336,8 @@ async function scanAndBuildLibraryFromDirs(dirs) {
         discNumber,
         year: year || null,
         fileHandle: item.fileHandle,
+        name: item.name,
+        parent: item.parent,
       };
 
       library.tracksById.set(trackId, trackObj);
@@ -2119,10 +2367,11 @@ async function scanAndBuildLibraryFromDirs(dirs) {
       const folderAlbums = albumKeysByFolder.get(folderPath);
       if (!folderAlbums || !folderAlbums.has(album.albumKey)) continue;
 
-      const images = albumImagesByFolder.get(folderPath) || [];
+      const images = [...(albumImagesByFolder.get(folderPath) || [])]
+        .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
       for (const image of images) {
         try {
-          const file = await getFileWithTimeout(image.fileHandle);
+          const file = await getFileFromItem(image);
           const url = URL.createObjectURL(file);
           if (!seen.has(url)) {
             seen.add(url);
@@ -2515,7 +2764,7 @@ async function playTrackById(trackId) {
   // Recreate a fresh object URL each time (safe across reloads)
   let file;
   try {
-    file = await getFileWithTimeout(track.fileHandle, FILE_READ_TIMEOUT_MS);
+    file = await getFileFromItem(track, FILE_READ_TIMEOUT_MS);
   } catch (err) {
     if (loadRequestId !== currentTrackRequestId) return; // superseded
     console.warn("Could not open track file:", track.path, err);
