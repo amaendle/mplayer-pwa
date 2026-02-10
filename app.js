@@ -1,3 +1,5 @@
+import {parseBlob} from 'https://cdn.jsdelivr.net/npm/music-metadata@11.12.0/+esm'
+
 // ===== PWA install (service worker) =====
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
@@ -1479,20 +1481,6 @@ function isImageName(name) {
   return /\.(jpe?g|png|webp)$/i.test(name);
 }
 
-// ===== Read ID3 tags using jsmediatags =====
-function readTagsFromFile(file) {
-  return new Promise((resolve) => {
-    if (!window.jsmediatags) {
-      resolve({ ok: false, reason: "jsmediatags not loaded" });
-      return;
-    }
-    window.jsmediatags.read(file, {
-      onSuccess: (res) => resolve({ ok: true, tags: res.tags }),
-      onError: (err) => resolve({ ok: false, reason: err?.info || "tag read error" }),
-    });
-  });
-}
-
 function coverUrlFromTags(tags) {
   // jsmediatags: tags.picture = { format, data: [byte...] }
   const pic = tags?.picture;
@@ -1648,17 +1636,15 @@ async function scanAndBuildLibraryFromDirs(dirs) {
           continue;
         }
 
-        const tagRes = await readTagsFromFile(file);
-        const tags = tagRes.ok ? tagRes.tags : {};
+        const mmResult = await parseBlob(file);
+        const tags = mmResult.common;
 
-        album = normalizeText(tags?.album, "Unknown album");
-        artist = normalizeText(tags?.artist, "Unknown artist");
-        albumArtist = normalizeText(tags?.albumartist ?? tags?.albumArtist, "");
-        title = normalizeText(tags?.title, stripAudioExtension(file.name));
-        const trackNoRaw = tags?.track; // can be "3/12" or number
-        const trackNo = parseInt((trackNoRaw ?? "").toString().split("/")[0], 10);
-        safeTrackNo = Number.isFinite(trackNo) ? trackNo : 0;
-        year = parseYear(tags?.year);
+        album = normalizeText(tags.album, "Unknown album");
+        artist = normalizeText(tags.artist, "Unknown artist");
+        albumArtist = normalizeText(tags.albumartist ?? tags?.albumArtist, "");
+        title = normalizeText(tags.title, stripAudioExtension(file.name));
+        safeTrackNo = tags.track.no;
+        year = tags.year;
         coverDataUrlForCache = coverDataUrlFromTags(tags);
         coverUrlForAlbum = coverDataUrlForCache || coverUrlFromTags(tags);
       }
