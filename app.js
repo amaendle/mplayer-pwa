@@ -247,6 +247,9 @@ function createCoverState(coverEl) {
 function measureCoverBaseSize(state) {
   if (!state?.coverEl) return 0;
   const coverEl = state.coverEl;
+  if (coverEl.id === "bigCover") {
+    return coverEl.getBoundingClientRect().width || 0;
+  }
   const prevWidth = coverEl.style.width;
   const prevHeight = coverEl.style.height;
   coverEl.style.width = "";
@@ -309,8 +312,6 @@ function updateCoverContainerAspect(state, ratio = null) {
   if (!state?.coverEl) return;
   const coverEl = state.coverEl;
   if (coverEl.id === "bigCover") {
-    coverEl.style.width = "";
-    coverEl.style.height = "";
     return;
   }
   if (!state.baseSize) {
@@ -655,6 +656,10 @@ window.addEventListener("resize", () => {
   resizeSpectrogramCanvas();
   [nowCoverState, titleCoverState].forEach((state) => {
     if (!state?.coverEl) return;
+    if (state.coverEl.id === "bigCover") {
+      updateCoverLayerAspect(state);
+      return;
+    }
     state.baseSize = measureCoverBaseSize(state) || state.baseSize;
     updateCoverLayerAspect(state);
   });
