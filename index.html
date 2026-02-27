@@ -49,6 +49,16 @@
       background:var(--card); color:var(--fg); border:1px solid var(--line); cursor:pointer; }
     .panel .modeRow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:10px 0 4px; }
     .panel .modeRow .pill { width:auto; min-width:90px; padding:10px 12px; border-radius:999px; }
+    .panel .modeRow select {
+      width:auto;
+      min-width:120px;
+      padding:8px 10px;
+      border-radius:12px;
+      background:var(--card);
+      color:var(--fg);
+      border:1px solid var(--line);
+      cursor:pointer;
+    }
 
     /* Player bar */
     .player {
@@ -420,28 +430,38 @@
   <!-- Drawer -->
   <div class="drawer" id="drawer" aria-hidden="true">
     <div class="panel">
-      <h2>Library</h2>
+      <h2 id="drawerTitle">Library</h2>
       <div class="small" id="libInfo">No folder connected yet.</div>
       <div class="modeRow">
         <div>
-          <div class="small">Rebuild speed</div>
+          <div class="small" id="labelRebuildSpeed">Rebuild speed</div>
           <div class="small" id="rebuildModeDesc">Fast rebuild (default)</div>
         </div>
         <button id="btnToggleRebuildMode" class="pill">Fast</button>
       </div>
       <div class="modeRow">
         <div>
-          <div class="small">Library storage</div>
+          <div class="small" id="labelLibraryStorage">Library storage</div>
           <div class="small" id="storageModeDesc">Keep permanent access to picked folders.</div>
         </div>
         <button id="btnToggleStorageMode" class="pill">Keep links</button>
       </div>
       <div class="modeRow">
         <div>
-          <div class="small">Easy access mode</div>
-          <div class="small">Larger tiles and big controls</div>
+          <div class="small" id="labelEasyAccessMode">Easy access mode</div>
+          <div class="small" id="easyAccessDesc">Larger tiles and big controls</div>
         </div>
         <button id="btnToggleEasyAccess" class="pill">Off</button>
+      </div>
+      <div class="modeRow">
+        <div>
+          <div class="small" id="labelLanguage">Language</div>
+          <div class="small" id="languageDesc">Choose app language</div>
+        </div>
+        <select id="selectLanguage" aria-label="Language">
+          <option value="en">English</option>
+          <option value="de">Deutsch</option>
+        </select>
       </div>
       <button id="btnReconnect">Reconnect / Request Permission</button>
       <button id="btnConnect">Add Music</button>

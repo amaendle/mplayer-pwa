@@ -66,6 +66,14 @@ const rebuildModeDescEl = document.getElementById("rebuildModeDesc");
 const rebuildModeButton = document.getElementById("btnToggleRebuildMode");
 const storageModeDescEl = document.getElementById("storageModeDesc");
 const storageModeButton = document.getElementById("btnToggleStorageMode");
+const languageSelectEl = document.getElementById("selectLanguage");
+const drawerTitleEl = document.getElementById("drawerTitle");
+const labelRebuildSpeedEl = document.getElementById("labelRebuildSpeed");
+const labelLibraryStorageEl = document.getElementById("labelLibraryStorage");
+const labelEasyAccessModeEl = document.getElementById("labelEasyAccessMode");
+const easyAccessDescEl = document.getElementById("easyAccessDesc");
+const labelLanguageEl = document.getElementById("labelLanguage");
+const languageDescEl = document.getElementById("languageDesc");
 
 document.getElementById("btnLibrary").onclick = toggleDrawer;
 document.getElementById("btnCloseDrawer").onclick = closeDrawer;
@@ -77,6 +85,7 @@ document.getElementById("btnClearLibrary").onclick = clearLibrary;
 document.getElementById("btnToggleStorageMode").onclick = toggleStorageMode;
 document.getElementById("btnToggleRebuildMode").onclick = toggleRebuildMode;
 document.getElementById("btnToggleEasyAccess").onclick = toggleEasyAccessMode;
+languageSelectEl?.addEventListener("change", onLanguageChange);
 
 document.getElementById("btnPrev").onclick = prev;
 document.getElementById("btnPlay").onclick = playPause;
@@ -961,6 +970,52 @@ const OPFS_LIBRARY_DIR = "opfsMusic";
 let fastRebuildEnabled = true;
 let easyAccessEnabled = false;
 let libraryImportMode = IMPORT_MODE_DIRECT;
+let appLanguage = "en";
+
+const I18N = {
+  en: {
+    drawerTitle: "Library",
+    labelRebuildSpeed: "Rebuild speed",
+    labelLibraryStorage: "Library storage",
+    labelEasyAccessMode: "Easy access mode",
+    easyAccessDesc: "Larger tiles and big controls",
+    labelLanguage: "Language",
+    languageDesc: "Choose app language",
+  },
+  de: {
+    drawerTitle: "Bibliothek",
+    labelRebuildSpeed: "Neuaufbau-Geschwindigkeit",
+    labelLibraryStorage: "Bibliotheksspeicher",
+    labelEasyAccessMode: "Einfachmodus",
+    easyAccessDesc: "Größere Kacheln und große Bedienelemente",
+    labelLanguage: "Sprache",
+    languageDesc: "App-Sprache auswählen",
+  },
+};
+
+function t(key) {
+  return I18N[appLanguage]?.[key] ?? I18N.en[key] ?? key;
+}
+
+function applyLanguageUI() {
+  document.documentElement.lang = appLanguage;
+  if (languageSelectEl) languageSelectEl.value = appLanguage;
+  if (drawerTitleEl) drawerTitleEl.textContent = t("drawerTitle");
+  if (labelRebuildSpeedEl) labelRebuildSpeedEl.textContent = t("labelRebuildSpeed");
+  if (labelLibraryStorageEl) labelLibraryStorageEl.textContent = t("labelLibraryStorage");
+  if (labelEasyAccessModeEl) labelEasyAccessModeEl.textContent = t("labelEasyAccessMode");
+  if (easyAccessDescEl) easyAccessDescEl.textContent = t("easyAccessDesc");
+  if (labelLanguageEl) labelLanguageEl.textContent = t("labelLanguage");
+  if (languageDescEl) languageDescEl.textContent = t("languageDesc");
+}
+
+function onLanguageChange() {
+  const next = languageSelectEl?.value === "de" ? "de" : "en";
+  if (next === appLanguage) return;
+  appLanguage = next;
+  applyLanguageUI();
+  persistSettings().catch(() => {});
+}
 
 let opfsRootHandle = null;
 
@@ -1003,13 +1058,17 @@ async function loadSettings() {
   if (saved && saved.libraryImportMode === IMPORT_MODE_OPFS && isOpfsSupported()) {
     libraryImportMode = IMPORT_MODE_OPFS;
   }
+  if (saved && (saved.appLanguage === "en" || saved.appLanguage === "de")) {
+    appLanguage = saved.appLanguage;
+  }
+  applyLanguageUI();
   updateRebuildModeUI();
   updateStorageModeUI();
   updateEasyAccessUI();
 }
 
 async function persistSettings() {
-  await idbSet(SETTINGS_KEY, { fastRebuildEnabled, easyAccessEnabled, libraryImportMode });
+  await idbSet(SETTINGS_KEY, { fastRebuildEnabled, easyAccessEnabled, libraryImportMode, appLanguage });
 }
 
 async function loadLibraryCache() {
