@@ -1025,6 +1025,10 @@ const I18N = {
     statusTrackNotFoundInPlayLater: "Track not found in Play later.",
     statusRemovedFromPlayLater: "Removed from Play later.",
     statusRestoredPlayLaterMissing: "Restored Play later list, but {count} item(s) could not be matched and were removed.",
+    statusConnectedScanning: "Connected {folders} folder(s). Scanning…",
+    statusReconnectedScanning: "Reconnected {folders} folder(s). Scanning…",
+    statusOpeningFiles: "Opening music files to extract metadata and covers… {read}/{total}",
+    noAlbumsYetConnect: "No albums yet. Connect a folder with MP3 or FLAC files.",
   },
   de: {
     drawerTitle: "Bibliothek",
@@ -1074,6 +1078,10 @@ const I18N = {
     statusTrackNotFoundInPlayLater: "Titel in Später abspielen nicht gefunden.",
     statusRemovedFromPlayLater: "Aus Später abspielen entfernt.",
     statusRestoredPlayLaterMissing: "Später-abspielen-Liste wiederhergestellt, aber {count} Eintrag/Einträge konnten nicht zugeordnet werden und wurden entfernt.",
+    statusConnectedScanning: "{folders} Ordner verbunden. Scanne…",
+    statusReconnectedScanning: "{folders} Ordner erneut verbunden. Scanne…",
+    statusOpeningFiles: "Musikdateien werden geöffnet, um Metadaten und Cover zu extrahieren… {read}/{total}",
+    noAlbumsYetConnect: "Noch keine Alben. Verbinde einen Ordner mit MP3- oder FLAC-Dateien.",
   },
 };
 
@@ -1412,7 +1420,7 @@ async function toggleStorageMode() {
 
   if (granted.length) {
     dirHandles = granted;
-    libInfoEl.textContent = `Reconnected ${dirHandles.length} folder(s). Scanning…`;
+    libInfoEl.textContent = tf("statusReconnectedScanning", { folders: dirHandles.length });
     setStatus("Linked folder mode: scanning saved folders…");
     await scanAndBuildLibraryFromDirs(dirHandles);
   } else {
@@ -1700,7 +1708,7 @@ function renderAlbums(albums) {
   if (!albums.length) {
     const emptyMsg = document.createElement("div");
     emptyMsg.style.color = "#a7a7a7";
-    emptyMsg.textContent = "No albums yet. Connect a folder with MP3 or FLAC files.";
+    emptyMsg.textContent = t("noAlbumsYetConnect");
     gridEl.appendChild(emptyMsg);
   }
 
@@ -2011,7 +2019,7 @@ async function connectFolder() {
         dirHandles = granted;
         await persistDirectories(saved);
         await idbSet("musicDirConnectedAt", Date.now());
-        libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
+        libInfoEl.textContent = tf("statusConnectedScanning", { folders: dirHandles.length });
         setStatus("Folder already connected. Scanning music…");
         await scanAndBuildLibraryFromDirs(dirHandles, { keepExistingIfEmpty: true });
         return;
@@ -2021,7 +2029,7 @@ async function connectFolder() {
       const updatedSaved = [...saved, handle];
       await persistDirectories(updatedSaved);
       await idbSet("musicDirConnectedAt", Date.now());
-      libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
+      libInfoEl.textContent = tf("statusConnectedScanning", { folders: dirHandles.length });
       setStatus("Folder added. Scanning music…");
       await scanAndBuildLibraryFromDirs(dirHandles, { keepExistingIfEmpty: true });
     }
@@ -2068,7 +2076,7 @@ async function reconnectFolder() {
     if (granted.length) {
       dirHandles = granted;
       await persistDirectories(saved);
-      libInfoEl.textContent = `Reconnected ${dirHandles.length} folder(s). Scanning…`;
+      libInfoEl.textContent = tf("statusReconnectedScanning", { folders: dirHandles.length });
       setStatus("Reconnected to saved folders. Scanning music…");
       await scanAndBuildLibraryFromDirs(dirHandles);
     } else {
@@ -2405,7 +2413,7 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
       } else {
         readCount++;
         if (readCount % 5 === 0 || readCount === audioCount) {
-          setStatus(`Opening music files to extract metadata and covers… ${readCount}/${audioCount}`);
+          setStatus(tf("statusOpeningFiles", { read: readCount, total: audioCount }));
         } else if (canUseCache && processedCount % 10 === 0) {
           setStatus(`Fast rebuild: restored ${processedCount}/${audioCount} (scanning new files)…`);
         }
