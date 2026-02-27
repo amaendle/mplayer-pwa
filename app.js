@@ -332,10 +332,24 @@ function updateCoverContainerAspect(state, ratio = null) {
   }
   const baseSize = state.baseSize || measureCoverBaseSize(state) || 0;
   if (!baseSize) return;
-  const maxVw = coverEl.id === "titleCover" ? 0.94 : 0.92;
-  const maxWidth = window.innerWidth * maxVw;
+
+  let targetRatio = ratio && Number.isFinite(ratio) ? ratio : 1;
+  if (coverEl.classList.contains("spectrogram-active")) {
+    targetRatio = Math.max(1, targetRatio);
+  }
+
+  if (coverEl.id === "titleCover") {
+    const maxWidth = Math.min(window.innerWidth * 0.94, 640);
+    const maxHeight = Math.max(180, window.innerHeight - 330);
+    const fitWidth = Math.min(maxWidth, maxHeight * targetRatio);
+    const fitHeight = fitWidth / targetRatio;
+    coverEl.style.width = `${Math.max(1, Math.round(fitWidth))}px`;
+    coverEl.style.height = `${Math.max(1, Math.round(fitHeight))}px`;
+    return;
+  }
+
+  const maxWidth = window.innerWidth * 0.92;
   const minWidth = baseSize * 0.4;
-  const targetRatio = ratio && Number.isFinite(ratio) ? ratio : 1;
   const rawWidth = baseSize * targetRatio;
   const width = Math.min(maxWidth, Math.max(minWidth, rawWidth));
   coverEl.style.width = `${Math.max(1, Math.round(width))}px`;
