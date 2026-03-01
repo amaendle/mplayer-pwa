@@ -185,6 +185,11 @@ easyPlayerEl?.addEventListener("click", (e) => {
   openTitleView();
 });
 
+titleViewEl?.addEventListener("click", (e) => {
+  if (e.target.closest(".titleClose, .bigCover, .bigControls")) return;
+  closeTitleView();
+});
+
 // Add open/close + UI update
 function openNowView() {
   closeTitleView({ restorePrevious: false });
