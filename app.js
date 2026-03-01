@@ -138,6 +138,18 @@ bigCoverEl?.addEventListener("click", () => {
     openCoverGallery(currentCoverGalleryUrls, currentCoverGalleryIndex);
   }
 });
+titleCoverEl?.addEventListener("click", (e) => {
+  if (!e.target.closest(".coverLayer")) return;
+  const sliderImgs = titleCoverEl.querySelectorAll(".coverSlider img");
+  if (!sliderImgs.length) return;
+  const activeIdx = Array.from(sliderImgs).findIndex((img) => img.classList.contains("active"));
+  const startIdx = activeIdx >= 0 ? activeIdx : 0;
+  const urls = titleCoverState?.slideUrls?.length
+    ? titleCoverState.slideUrls
+    : Array.from(sliderImgs).map((img) => img.getAttribute("src") || "").filter(Boolean);
+  if (!urls.length) return;
+  openCoverGallery(urls, startIdx);
+});
 
 let nowCoverState = null;
 let titleCoverState = null;
