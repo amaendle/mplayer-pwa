@@ -296,19 +296,33 @@
     }
     .coverGalleryControls {
       display:flex;
-      gap:12px;
+      flex-direction:column;
+      gap:10px;
       position:fixed;
       left:0;
       right:0;
       bottom:24px;
       justify-content:center;
+      align-items:center;
       padding:0 16px;
     }
+    .coverGalleryControlsRow {
+      display:flex;
+      gap:10px;
+      justify-content:center;
+      flex-wrap:wrap;
+    }
     .coverGalleryControls button {
-      height:72px;
-      min-width:72px;
-      font-size:28px;
-      border-radius:18px;
+      height:64px;
+      min-width:64px;
+      font-size:24px;
+      border-radius:16px;
+    }
+    .coverGalleryControls button.compact {
+      min-width:52px;
+      height:52px;
+      font-size:18px;
+      padding:0 10px;
     }
     .coverGalleryClose {
       position:absolute;
@@ -519,8 +533,18 @@
     <div class="coverGalleryInner">
       <img class="coverGalleryImage" id="coverGalleryImage" alt="Album cover">
       <div class="coverGalleryControls">
-        <button type="button" id="btnCoverGalleryPrev">◀</button>
-        <button type="button" id="btnCoverGalleryNext">▶</button>
+        <div class="coverGalleryControlsRow">
+          <button type="button" id="btnCoverToggleStar" class="compact" title="Toggle star">☆</button>
+          <button type="button" id="btnCoverTiltLeft" class="compact" title="Tilt left">↺</button>
+          <button type="button" id="btnCoverTiltRight" class="compact" title="Tilt right">↻</button>
+          <button type="button" id="btnCoverCropRight" class="compact" title="Crop right">⇥</button>
+          <button type="button" id="btnCoverApplyFilter" class="compact" title="Apply selected transform">Apply</button>
+          <button type="button" id="btnCoverUndoFilter" class="compact" title="Undo last transform">Undo</button>
+        </div>
+        <div class="coverGalleryControlsRow">
+          <button type="button" id="btnCoverGalleryPrev">◀</button>
+          <button type="button" id="btnCoverGalleryNext">▶</button>
+        </div>
       </div>
     </div>
   </div>

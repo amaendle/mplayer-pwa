@@ -59,6 +59,12 @@ const coverGalleryPrevEl = document.getElementById("btnCoverGalleryPrev");
 const coverGalleryNextEl = document.getElementById("btnCoverGalleryNext");
 const coverGalleryCloseEl = document.getElementById("btnCloseCoverGallery");
 const coverGallerySwipeTargetEl = document.getElementById("coverGalleryImage");
+const coverToggleStarEl = document.getElementById("btnCoverToggleStar");
+const coverTiltLeftEl = document.getElementById("btnCoverTiltLeft");
+const coverTiltRightEl = document.getElementById("btnCoverTiltRight");
+const coverCropRightEl = document.getElementById("btnCoverCropRight");
+const coverApplyFilterEl = document.getElementById("btnCoverApplyFilter");
+const coverUndoFilterEl = document.getElementById("btnCoverUndoFilter");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
@@ -126,6 +132,12 @@ coverGallerySwipeTargetEl?.addEventListener("pointerup", (e) => {
     stepCoverGallery(dx > 0 ? -1 : 1);
   }
 });
+coverToggleStarEl?.addEventListener("click", toggleStarForCurrentCover);
+coverTiltLeftEl?.addEventListener("click", () => queueCoverTransform({ type: "tilt", delta: -90 }));
+coverTiltRightEl?.addEventListener("click", () => queueCoverTransform({ type: "tilt", delta: 90 }));
+coverCropRightEl?.addEventListener("click", () => queueCoverTransform({ type: "crop", mode: "right" }));
+coverApplyFilterEl?.addEventListener("click", applyPendingCoverTransform);
+coverUndoFilterEl?.addEventListener("click", undoCurrentCoverTransform);
 
 const nowViewEl = document.getElementById("nowView");
 const bigCoverEl = document.getElementById("bigCover");
@@ -155,6 +167,8 @@ let nowCoverState = null;
 let titleCoverState = null;
 let currentCoverGalleryUrls = [];
 let currentCoverGalleryIndex = 0;
+const coverEditStateByUrl = new Map();
+let pendingCoverTransform = null;
 let titleViewPreviousState = null;
 let isTitleSeeking = false;
 let spectrogramHostEl = null;
@@ -510,14 +524,119 @@ function renderCoverStatic(state, url) {
   updateCoverLayerAspect(state);
 }
 
+function getCurrentGalleryCoverUrl() {
+  return currentCoverGalleryUrls[currentCoverGalleryIndex] || "";
+}
+
+function getCoverEditState(url) {
+  if (!url) return { tiltDeg: 0, cropMode: "none", starred: false, history: [] };
+  if (!coverEditStateByUrl.has(url)) {
+    coverEditStateByUrl.set(url, { tiltDeg: 0, cropMode: "none", starred: false, history: [] });
+  }
+  return coverEditStateByUrl.get(url);
+}
+
+function getRenderCoverEdit(url) {
+  const base = getCoverEditState(url);
+  if (!pendingCoverTransform || !url || getCurrentGalleryCoverUrl() !== url) return base;
+  const preview = { ...base, history: [...base.history] };
+  if (pendingCoverTransform.type === "tilt") {
+    preview.tiltDeg += pendingCoverTransform.delta;
+  }
+  if (pendingCoverTransform.type === "crop") {
+    preview.cropMode = pendingCoverTransform.mode;
+  }
+  return preview;
+}
+
+function styleCoverImageElement(imgEl, url) {
+  if (!imgEl || !url) return;
+  const edit = getRenderCoverEdit(url);
+  imgEl.style.transform = `rotate(${edit.tiltDeg}deg)`;
+  imgEl.style.objectPosition = edit.cropMode === "right" ? "right center" : "center center";
+  imgEl.style.boxShadow = edit.starred ? "0 0 0 2px #f5cf3a inset" : "";
+}
+
+function applyEditsToVisibleCoverImages() {
+  const coverImgs = document.querySelectorAll(".coverStrip img, .coverSlider img");
+  coverImgs.forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    if (!src) return;
+    styleCoverImageElement(img, src);
+  });
+  const galleryUrl = getCurrentGalleryCoverUrl();
+  if (coverGalleryImageEl && galleryUrl) {
+    styleCoverImageElement(coverGalleryImageEl, galleryUrl);
+  }
+}
+
+function updateCoverEditorButtons() {
+  const url = getCurrentGalleryCoverUrl();
+  const edit = getCoverEditState(url);
+  if (coverToggleStarEl) coverToggleStarEl.textContent = edit.starred ? "★" : "☆";
+  if (coverApplyFilterEl) coverApplyFilterEl.disabled = !pendingCoverTransform;
+  if (coverUndoFilterEl) coverUndoFilterEl.disabled = !(url && edit.history.length);
+}
+
+function renderCoverGalleryImage() {
+  if (!coverGalleryImageEl || !currentCoverGalleryUrls.length) return;
+  const url = getCurrentGalleryCoverUrl();
+  coverGalleryImageEl.src = url;
+  coverGalleryImageEl.onload = () => {
+    styleCoverImageElement(coverGalleryImageEl, url);
+  };
+  applyEditsToVisibleCoverImages();
+  updateCoverEditorButtons();
+}
+
+function queueCoverTransform(transform) {
+  pendingCoverTransform = transform;
+  renderCoverGalleryImage();
+}
+
+function applyPendingCoverTransform() {
+  const url = getCurrentGalleryCoverUrl();
+  if (!url || !pendingCoverTransform) return;
+  const state = getCoverEditState(url);
+  state.history.push({ tiltDeg: state.tiltDeg, cropMode: state.cropMode });
+  if (pendingCoverTransform.type === "tilt") {
+    state.tiltDeg += pendingCoverTransform.delta;
+  }
+  if (pendingCoverTransform.type === "crop") {
+    state.cropMode = pendingCoverTransform.mode;
+  }
+  pendingCoverTransform = null;
+  renderCoverGalleryImage();
+}
+
+function undoCurrentCoverTransform() {
+  const url = getCurrentGalleryCoverUrl();
+  if (!url) return;
+  const state = getCoverEditState(url);
+  const prev = state.history.pop();
+  if (!prev) return;
+  state.tiltDeg = prev.tiltDeg;
+  state.cropMode = prev.cropMode;
+  pendingCoverTransform = null;
+  renderCoverGalleryImage();
+}
+
+function toggleStarForCurrentCover() {
+  const url = getCurrentGalleryCoverUrl();
+  if (!url) return;
+  const state = getCoverEditState(url);
+  state.starred = !state.starred;
+  renderCoverGalleryImage();
+}
+
 function openCoverGallery(urls, startIndex = 0) {
   const galleryEl = document.getElementById("coverGallery");
-  const imgEl = document.getElementById("coverGalleryImage");
-  if (!galleryEl || !imgEl) return;
+  if (!galleryEl || !coverGalleryImageEl) return;
+  pendingCoverTransform = null;
   currentCoverGalleryUrls = Array.isArray(urls) ? urls.filter(Boolean) : [];
   if (!currentCoverGalleryUrls.length) return;
   currentCoverGalleryIndex = Math.min(Math.max(startIndex, 0), currentCoverGalleryUrls.length - 1);
-  imgEl.src = currentCoverGalleryUrls[currentCoverGalleryIndex];
+  renderCoverGalleryImage();
   galleryEl.classList.add("open");
   galleryEl.setAttribute("aria-hidden", "false");
 }
@@ -525,16 +644,17 @@ function openCoverGallery(urls, startIndex = 0) {
 function closeCoverGallery() {
   const galleryEl = document.getElementById("coverGallery");
   if (!galleryEl) return;
+  pendingCoverTransform = null;
   galleryEl.classList.remove("open");
   galleryEl.setAttribute("aria-hidden", "true");
 }
 
 function stepCoverGallery(step) {
-  const imgEl = document.getElementById("coverGalleryImage");
-  if (!imgEl || !currentCoverGalleryUrls.length) return;
+  if (!coverGalleryImageEl || !currentCoverGalleryUrls.length) return;
+  pendingCoverTransform = null;
   currentCoverGalleryIndex = (currentCoverGalleryIndex + step + currentCoverGalleryUrls.length)
     % currentCoverGalleryUrls.length;
-  imgEl.src = currentCoverGalleryUrls[currentCoverGalleryIndex];
+  renderCoverGalleryImage();
 }
 
 function ensureSpectrogramCanvas(hostEl = spectrogramHostEl) {
@@ -852,6 +972,7 @@ function updateNowViewUI(track) {
   } else if (track && albumForCover && track.albumId === albumForCover.id) {
     activeTrackId = track.id;
   }
+  applyEditsToVisibleCoverImages();
   renderTracklist(activeTrackId);
 }
 
@@ -863,6 +984,7 @@ function updateTitleViewUI(track) {
     clearCoverSlideshow(titleCoverState);
     titleCoverState.slideUrls = [];
     if (titleCoverState.coverEl) titleCoverState.coverEl.innerHTML = "";
+    applyEditsToVisibleCoverImages();
     return;
   }
 
@@ -914,6 +1036,8 @@ function updateTitleViewUI(track) {
     setCoverContent(titleCoverState, "");
     showSpectrogramForState(titleCoverState);
   }
+
+  applyEditsToVisibleCoverImages();
 }
 
 function updateAlbumInfoUI(album) {
