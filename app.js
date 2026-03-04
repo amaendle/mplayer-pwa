@@ -59,6 +59,12 @@ const coverGalleryPrevEl = document.getElementById("btnCoverGalleryPrev");
 const coverGalleryNextEl = document.getElementById("btnCoverGalleryNext");
 const coverGalleryCloseEl = document.getElementById("btnCloseCoverGallery");
 const coverGallerySwipeTargetEl = document.getElementById("coverGalleryImage");
+const coverToggleStarEl = document.getElementById("btnCoverToggleStar");
+const coverTiltLeftEl = document.getElementById("btnCoverTiltLeft");
+const coverTiltRightEl = document.getElementById("btnCoverTiltRight");
+const coverCropRightEl = document.getElementById("btnCoverCropRight");
+const coverApplyFilterEl = document.getElementById("btnCoverApplyFilter");
+const coverUndoFilterEl = document.getElementById("btnCoverUndoFilter");
 
 const drawerEl = document.getElementById("drawer");
 const libInfoEl = document.getElementById("libInfo");
@@ -66,6 +72,18 @@ const rebuildModeDescEl = document.getElementById("rebuildModeDesc");
 const rebuildModeButton = document.getElementById("btnToggleRebuildMode");
 const storageModeDescEl = document.getElementById("storageModeDesc");
 const storageModeButton = document.getElementById("btnToggleStorageMode");
+const languageSelectEl = document.getElementById("selectLanguage");
+const drawerTitleEl = document.getElementById("drawerTitle");
+const labelRebuildSpeedEl = document.getElementById("labelRebuildSpeed");
+const labelLibraryStorageEl = document.getElementById("labelLibraryStorage");
+const labelEasyAccessModeEl = document.getElementById("labelEasyAccessMode");
+const easyAccessDescEl = document.getElementById("easyAccessDesc");
+const labelLanguageEl = document.getElementById("labelLanguage");
+const languageDescEl = document.getElementById("languageDesc");
+const btnReconnectEl = document.getElementById("btnReconnect");
+const btnConnectEl = document.getElementById("btnConnect");
+const btnClearLibraryEl = document.getElementById("btnClearLibrary");
+const btnCloseDrawerEl = document.getElementById("btnCloseDrawer");
 
 document.getElementById("btnLibrary").onclick = toggleDrawer;
 document.getElementById("btnCloseDrawer").onclick = closeDrawer;
@@ -77,6 +95,7 @@ document.getElementById("btnClearLibrary").onclick = clearLibrary;
 document.getElementById("btnToggleStorageMode").onclick = toggleStorageMode;
 document.getElementById("btnToggleRebuildMode").onclick = toggleRebuildMode;
 document.getElementById("btnToggleEasyAccess").onclick = toggleEasyAccessMode;
+languageSelectEl?.addEventListener("change", onLanguageChange);
 
 document.getElementById("btnPrev").onclick = prev;
 document.getElementById("btnPlay").onclick = playPause;
@@ -113,6 +132,12 @@ coverGallerySwipeTargetEl?.addEventListener("pointerup", (e) => {
     stepCoverGallery(dx > 0 ? -1 : 1);
   }
 });
+coverToggleStarEl?.addEventListener("click", toggleStarForCurrentCover);
+coverTiltLeftEl?.addEventListener("click", () => queueCoverTransform({ type: "tilt", delta: -90 }));
+coverTiltRightEl?.addEventListener("click", () => queueCoverTransform({ type: "tilt", delta: 90 }));
+coverCropRightEl?.addEventListener("click", () => queueCoverTransform({ type: "crop", mode: "right" }));
+coverApplyFilterEl?.addEventListener("click", applyPendingCoverTransform);
+coverUndoFilterEl?.addEventListener("click", undoCurrentCoverTransform);
 
 const nowViewEl = document.getElementById("nowView");
 const bigCoverEl = document.getElementById("bigCover");
@@ -125,11 +150,25 @@ bigCoverEl?.addEventListener("click", () => {
     openCoverGallery(currentCoverGalleryUrls, currentCoverGalleryIndex);
   }
 });
+titleCoverEl?.addEventListener("click", (e) => {
+  if (!e.target.closest(".coverLayer")) return;
+  const sliderImgs = titleCoverEl.querySelectorAll(".coverSlider img");
+  if (!sliderImgs.length) return;
+  const activeIdx = Array.from(sliderImgs).findIndex((img) => img.classList.contains("active"));
+  const startIdx = activeIdx >= 0 ? activeIdx : 0;
+  const urls = titleCoverState?.slideUrls?.length
+    ? titleCoverState.slideUrls
+    : Array.from(sliderImgs).map((img) => img.getAttribute("src") || "").filter(Boolean);
+  if (!urls.length) return;
+  openCoverGallery(urls, startIdx);
+});
 
 let nowCoverState = null;
 let titleCoverState = null;
 let currentCoverGalleryUrls = [];
 let currentCoverGalleryIndex = 0;
+const coverEditStateByUrl = new Map();
+let pendingCoverTransform = null;
 let titleViewPreviousState = null;
 let isTitleSeeking = false;
 let spectrogramHostEl = null;
@@ -170,6 +209,11 @@ easyPlayerEl?.addEventListener("click", (e) => {
   if (e.target.closest(".bigControls")) return;
   openNowViewForCurrentPlayback();
   openTitleView();
+});
+
+titleViewEl?.addEventListener("click", (e) => {
+  if (e.target.closest(".titleClose, .bigCover, .bigControls")) return;
+  closeTitleView();
 });
 
 // Add open/close + UI update
@@ -319,10 +363,24 @@ function updateCoverContainerAspect(state, ratio = null) {
   }
   const baseSize = state.baseSize || measureCoverBaseSize(state) || 0;
   if (!baseSize) return;
-  const maxVw = coverEl.id === "titleCover" ? 0.94 : 0.92;
-  const maxWidth = window.innerWidth * maxVw;
+
+  let targetRatio = ratio && Number.isFinite(ratio) ? ratio : 1;
+  if (coverEl.classList.contains("spectrogram-active")) {
+    targetRatio = Math.max(1, targetRatio);
+  }
+
+  if (coverEl.id === "titleCover") {
+    const maxWidth = Math.min(window.innerWidth * 0.94, 640);
+    const maxHeight = Math.max(180, window.innerHeight - 330);
+    const fitWidth = Math.min(maxWidth, maxHeight * targetRatio);
+    const fitHeight = fitWidth / targetRatio;
+    coverEl.style.width = `${Math.max(1, Math.round(fitWidth))}px`;
+    coverEl.style.height = `${Math.max(1, Math.round(fitHeight))}px`;
+    return;
+  }
+
+  const maxWidth = window.innerWidth * 0.92;
   const minWidth = baseSize * 0.4;
-  const targetRatio = ratio && Number.isFinite(ratio) ? ratio : 1;
   const rawWidth = baseSize * targetRatio;
   const width = Math.min(maxWidth, Math.max(minWidth, rawWidth));
   coverEl.style.width = `${Math.max(1, Math.round(width))}px`;
@@ -466,14 +524,119 @@ function renderCoverStatic(state, url) {
   updateCoverLayerAspect(state);
 }
 
+function getCurrentGalleryCoverUrl() {
+  return currentCoverGalleryUrls[currentCoverGalleryIndex] || "";
+}
+
+function getCoverEditState(url) {
+  if (!url) return { tiltDeg: 0, cropMode: "none", starred: false, history: [] };
+  if (!coverEditStateByUrl.has(url)) {
+    coverEditStateByUrl.set(url, { tiltDeg: 0, cropMode: "none", starred: false, history: [] });
+  }
+  return coverEditStateByUrl.get(url);
+}
+
+function getRenderCoverEdit(url) {
+  const base = getCoverEditState(url);
+  if (!pendingCoverTransform || !url || getCurrentGalleryCoverUrl() !== url) return base;
+  const preview = { ...base, history: [...base.history] };
+  if (pendingCoverTransform.type === "tilt") {
+    preview.tiltDeg += pendingCoverTransform.delta;
+  }
+  if (pendingCoverTransform.type === "crop") {
+    preview.cropMode = pendingCoverTransform.mode;
+  }
+  return preview;
+}
+
+function styleCoverImageElement(imgEl, url) {
+  if (!imgEl || !url) return;
+  const edit = getRenderCoverEdit(url);
+  imgEl.style.transform = `rotate(${edit.tiltDeg}deg)`;
+  imgEl.style.objectPosition = edit.cropMode === "right" ? "right center" : "center center";
+  imgEl.style.boxShadow = edit.starred ? "0 0 0 2px #f5cf3a inset" : "";
+}
+
+function applyEditsToVisibleCoverImages() {
+  const coverImgs = document.querySelectorAll(".coverStrip img, .coverSlider img");
+  coverImgs.forEach((img) => {
+    const src = img.getAttribute("src") || "";
+    if (!src) return;
+    styleCoverImageElement(img, src);
+  });
+  const galleryUrl = getCurrentGalleryCoverUrl();
+  if (coverGalleryImageEl && galleryUrl) {
+    styleCoverImageElement(coverGalleryImageEl, galleryUrl);
+  }
+}
+
+function updateCoverEditorButtons() {
+  const url = getCurrentGalleryCoverUrl();
+  const edit = getCoverEditState(url);
+  if (coverToggleStarEl) coverToggleStarEl.textContent = edit.starred ? "★" : "☆";
+  if (coverApplyFilterEl) coverApplyFilterEl.disabled = !pendingCoverTransform;
+  if (coverUndoFilterEl) coverUndoFilterEl.disabled = !(url && edit.history.length);
+}
+
+function renderCoverGalleryImage() {
+  if (!coverGalleryImageEl || !currentCoverGalleryUrls.length) return;
+  const url = getCurrentGalleryCoverUrl();
+  coverGalleryImageEl.src = url;
+  coverGalleryImageEl.onload = () => {
+    styleCoverImageElement(coverGalleryImageEl, url);
+  };
+  applyEditsToVisibleCoverImages();
+  updateCoverEditorButtons();
+}
+
+function queueCoverTransform(transform) {
+  pendingCoverTransform = transform;
+  renderCoverGalleryImage();
+}
+
+function applyPendingCoverTransform() {
+  const url = getCurrentGalleryCoverUrl();
+  if (!url || !pendingCoverTransform) return;
+  const state = getCoverEditState(url);
+  state.history.push({ tiltDeg: state.tiltDeg, cropMode: state.cropMode });
+  if (pendingCoverTransform.type === "tilt") {
+    state.tiltDeg += pendingCoverTransform.delta;
+  }
+  if (pendingCoverTransform.type === "crop") {
+    state.cropMode = pendingCoverTransform.mode;
+  }
+  pendingCoverTransform = null;
+  renderCoverGalleryImage();
+}
+
+function undoCurrentCoverTransform() {
+  const url = getCurrentGalleryCoverUrl();
+  if (!url) return;
+  const state = getCoverEditState(url);
+  const prev = state.history.pop();
+  if (!prev) return;
+  state.tiltDeg = prev.tiltDeg;
+  state.cropMode = prev.cropMode;
+  pendingCoverTransform = null;
+  renderCoverGalleryImage();
+}
+
+function toggleStarForCurrentCover() {
+  const url = getCurrentGalleryCoverUrl();
+  if (!url) return;
+  const state = getCoverEditState(url);
+  state.starred = !state.starred;
+  renderCoverGalleryImage();
+}
+
 function openCoverGallery(urls, startIndex = 0) {
   const galleryEl = document.getElementById("coverGallery");
-  const imgEl = document.getElementById("coverGalleryImage");
-  if (!galleryEl || !imgEl) return;
+  if (!galleryEl || !coverGalleryImageEl) return;
+  pendingCoverTransform = null;
   currentCoverGalleryUrls = Array.isArray(urls) ? urls.filter(Boolean) : [];
   if (!currentCoverGalleryUrls.length) return;
   currentCoverGalleryIndex = Math.min(Math.max(startIndex, 0), currentCoverGalleryUrls.length - 1);
-  imgEl.src = currentCoverGalleryUrls[currentCoverGalleryIndex];
+  renderCoverGalleryImage();
   galleryEl.classList.add("open");
   galleryEl.setAttribute("aria-hidden", "false");
 }
@@ -481,16 +644,17 @@ function openCoverGallery(urls, startIndex = 0) {
 function closeCoverGallery() {
   const galleryEl = document.getElementById("coverGallery");
   if (!galleryEl) return;
+  pendingCoverTransform = null;
   galleryEl.classList.remove("open");
   galleryEl.setAttribute("aria-hidden", "true");
 }
 
 function stepCoverGallery(step) {
-  const imgEl = document.getElementById("coverGalleryImage");
-  if (!imgEl || !currentCoverGalleryUrls.length) return;
+  if (!coverGalleryImageEl || !currentCoverGalleryUrls.length) return;
+  pendingCoverTransform = null;
   currentCoverGalleryIndex = (currentCoverGalleryIndex + step + currentCoverGalleryUrls.length)
     % currentCoverGalleryUrls.length;
-  imgEl.src = currentCoverGalleryUrls[currentCoverGalleryIndex];
+  renderCoverGalleryImage();
 }
 
 function ensureSpectrogramCanvas(hostEl = spectrogramHostEl) {
@@ -808,6 +972,7 @@ function updateNowViewUI(track) {
   } else if (track && albumForCover && track.albumId === albumForCover.id) {
     activeTrackId = track.id;
   }
+  applyEditsToVisibleCoverImages();
   renderTracklist(activeTrackId);
 }
 
@@ -819,6 +984,7 @@ function updateTitleViewUI(track) {
     clearCoverSlideshow(titleCoverState);
     titleCoverState.slideUrls = [];
     if (titleCoverState.coverEl) titleCoverState.coverEl.innerHTML = "";
+    applyEditsToVisibleCoverImages();
     return;
   }
 
@@ -870,6 +1036,8 @@ function updateTitleViewUI(track) {
     setCoverContent(titleCoverState, "");
     showSpectrogramForState(titleCoverState);
   }
+
+  applyEditsToVisibleCoverImages();
 }
 
 function updateAlbumInfoUI(album) {
@@ -961,6 +1129,148 @@ const OPFS_LIBRARY_DIR = "opfsMusic";
 let fastRebuildEnabled = true;
 let easyAccessEnabled = false;
 let libraryImportMode = IMPORT_MODE_DIRECT;
+let appLanguage = "en";
+
+const I18N = {
+  en: {
+    drawerTitle: "Library",
+    labelRebuildSpeed: "Rebuild speed",
+    labelLibraryStorage: "Library storage",
+    labelEasyAccessMode: "Easy access mode",
+    easyAccessDesc: "Larger tiles and big controls",
+    labelLanguage: "Language",
+    languageDesc: "Choose app language",
+    btnReconnect: "Reconnect / Request Permission",
+    btnConnect: "Add Music",
+    btnClearLibrary: "Remove all folders",
+    btnCloseDrawer: "Close",
+    rebuildFast: "Fast",
+    rebuildFull: "Full check",
+    rebuildDescFast: "Fast rebuild (default) uses cached tags and only scans new files.",
+    rebuildDescFull: "Full check re-reads every file, tags, and cover.",
+    storageImportOnce: "Import once",
+    storageKeepLinks: "Keep links",
+    storageDescImport: "Copy picked folders into app storage (OPFS).",
+    storageDescLinks: "Keep permanent access to picked folders.",
+    easyOn: "On",
+    easyOff: "Off",
+    playLater: "Play later",
+    clearPlayLater: "Clear Play later",
+    addTrackToPlayLater: "Add this track to Play later",
+    remove: "Remove",
+    removeFromPlayLater: "Remove from Play later",
+    playLaterEmpty: "Play later is empty.",
+    noTracksAlbum: "No tracks in this album.",
+    addAlbumsWithPlayLater: "Add albums with Play later",
+    trackCount: "{count} track(s)",
+    statusConnectedAlbums: "Connected to {folders} folder(s). {albums} albums found. Tap an album cover to play.",
+    statusImportedAlbums: "Using imported library. {albums} albums found. Tap an album cover to play.",
+    statusReadyAlbums: "Ready: {albums} albums across {source}. Tap an album cover to start.",
+    statusLibraryCleared: "Library cleared. Use Add Music to connect folders again.",
+    statusPlayLaterListEmpty: "Your Play later list is empty.",
+    statusAlbumNoTracksPlay: "This album has no tracks to play.",
+    statusAlbumNoTracksAdd: "This album has no tracks to add.",
+    statusDuplicateRemoved: "Removed {count} duplicate(s) already in Play later.",
+    statusAllTracksAlreadyPlayLater: "All tracks already in Play later.",
+    statusAddedTracksToPlayLater: "Added {count} track(s) to Play later.",
+    statusTrackAlreadyPlayLater: "Track already in Play later; keeping existing spot.",
+    statusAddedToPlayLater: "Added to Play later.",
+    statusPlayLaterAlreadyEmpty: "Play later is already empty.",
+    statusPlayLaterCleared: "Play later cleared.",
+    statusTrackNotFoundInPlayLater: "Track not found in Play later.",
+    statusRemovedFromPlayLater: "Removed from Play later.",
+    statusRestoredPlayLaterMissing: "Restored Play later list, but {count} item(s) could not be matched and were removed.",
+    statusConnectedScanning: "Connected {folders} folder(s). Scanning…",
+    statusReconnectedScanning: "Reconnected {folders} folder(s). Scanning…",
+    statusOpeningFiles: "Opening music files to extract metadata and covers… {read}/{total}",
+    noAlbumsYetConnect: "No albums yet. Connect a folder with MP3 or FLAC files.",
+  },
+  de: {
+    drawerTitle: "Bibliothek",
+    labelRebuildSpeed: "Neuaufbau-Geschwindigkeit",
+    labelLibraryStorage: "Bibliotheksspeicher",
+    labelEasyAccessMode: "Einfachmodus",
+    easyAccessDesc: "Größere Kacheln und große Bedienelemente",
+    labelLanguage: "Sprache",
+    languageDesc: "App-Sprache auswählen",
+    btnReconnect: "Neu verbinden / Berechtigung anfragen",
+    btnConnect: "Musik hinzufügen",
+    btnClearLibrary: "Alle Ordner entfernen",
+    btnCloseDrawer: "Schließen",
+    rebuildFast: "Schnell",
+    rebuildFull: "Vollständig",
+    rebuildDescFast: "Schneller Neuaufbau (Standard) nutzt gespeicherte Tags und scannt nur neue Dateien.",
+    rebuildDescFull: "Vollständiger Check liest alle Dateien, Tags und Cover neu ein.",
+    storageImportOnce: "Einmal importieren",
+    storageKeepLinks: "Verknüpfungen behalten",
+    storageDescImport: "Ausgewählte Ordner in den App-Speicher (OPFS) kopieren.",
+    storageDescLinks: "Dauerhaften Zugriff auf ausgewählte Ordner behalten.",
+    easyOn: "An",
+    easyOff: "Aus",
+    playLater: "Später abspielen",
+    clearPlayLater: "Später abspielen leeren",
+    addTrackToPlayLater: "Diesen Titel zu Später abspielen hinzufügen",
+    remove: "Entfernen",
+    removeFromPlayLater: "Aus Später abspielen entfernen",
+    playLaterEmpty: "Später abspielen ist leer.",
+    noTracksAlbum: "Dieses Album enthält keine Titel.",
+    addAlbumsWithPlayLater: "Alben mit Später abspielen hinzufügen",
+    trackCount: "{count} Titel",
+    statusConnectedAlbums: "Verbunden mit {folders} Ordner(n). {albums} Alben gefunden. Tippe auf ein Albumcover zum Abspielen.",
+    statusImportedAlbums: "Importierte Bibliothek wird verwendet. {albums} Alben gefunden. Tippe auf ein Albumcover zum Abspielen.",
+    statusReadyAlbums: "Bereit: {albums} Alben aus {source}. Tippe auf ein Albumcover zum Starten.",
+    statusLibraryCleared: "Bibliothek geleert. Nutze Musik hinzufügen, um wieder Ordner zu verbinden.",
+    statusPlayLaterListEmpty: "Deine Später-abspielen-Liste ist leer.",
+    statusAlbumNoTracksPlay: "Dieses Album enthält keine abspielbaren Titel.",
+    statusAlbumNoTracksAdd: "Dieses Album enthält keine Titel zum Hinzufügen.",
+    statusDuplicateRemoved: "{count} Duplikat(e) aus Später abspielen entfernt.",
+    statusAllTracksAlreadyPlayLater: "Alle Titel sind bereits in Später abspielen.",
+    statusAddedTracksToPlayLater: "{count} Titel zu Später abspielen hinzugefügt.",
+    statusTrackAlreadyPlayLater: "Titel ist bereits in Später abspielen; Position bleibt erhalten.",
+    statusAddedToPlayLater: "Zu Später abspielen hinzugefügt.",
+    statusPlayLaterAlreadyEmpty: "Später abspielen ist bereits leer.",
+    statusPlayLaterCleared: "Später abspielen geleert.",
+    statusTrackNotFoundInPlayLater: "Titel in Später abspielen nicht gefunden.",
+    statusRemovedFromPlayLater: "Aus Später abspielen entfernt.",
+    statusRestoredPlayLaterMissing: "Später-abspielen-Liste wiederhergestellt, aber {count} Eintrag/Einträge konnten nicht zugeordnet werden und wurden entfernt.",
+    statusConnectedScanning: "{folders} Ordner verbunden. Scanne…",
+    statusReconnectedScanning: "{folders} Ordner erneut verbunden. Scanne…",
+    statusOpeningFiles: "Musikdateien werden geöffnet, um Metadaten und Cover zu extrahieren… {read}/{total}",
+    noAlbumsYetConnect: "Noch keine Alben. Verbinde einen Ordner mit MP3- oder FLAC-Dateien.",
+  },
+};
+
+function t(key) {
+  return I18N[appLanguage]?.[key] ?? I18N.en[key] ?? key;
+}
+
+function tf(key, vars = {}) {
+  return t(key).replace(/\{(\w+)\}/g, (_, name) => `${vars[name] ?? ""}`);
+}
+
+function applyLanguageUI() {
+  document.documentElement.lang = appLanguage;
+  if (languageSelectEl) languageSelectEl.value = appLanguage;
+  if (drawerTitleEl) drawerTitleEl.textContent = t("drawerTitle");
+  if (labelRebuildSpeedEl) labelRebuildSpeedEl.textContent = t("labelRebuildSpeed");
+  if (labelLibraryStorageEl) labelLibraryStorageEl.textContent = t("labelLibraryStorage");
+  if (labelEasyAccessModeEl) labelEasyAccessModeEl.textContent = t("labelEasyAccessMode");
+  if (easyAccessDescEl) easyAccessDescEl.textContent = t("easyAccessDesc");
+  if (labelLanguageEl) labelLanguageEl.textContent = t("labelLanguage");
+  if (languageDescEl) languageDescEl.textContent = t("languageDesc");
+  if (btnReconnectEl) btnReconnectEl.textContent = t("btnReconnect");
+  if (btnConnectEl) btnConnectEl.textContent = t("btnConnect");
+  if (btnClearLibraryEl) btnClearLibraryEl.textContent = t("btnClearLibrary");
+  if (btnCloseDrawerEl) btnCloseDrawerEl.textContent = t("btnCloseDrawer");
+}
+
+function onLanguageChange() {
+  const next = languageSelectEl?.value === "de" ? "de" : "en";
+  if (next === appLanguage) return;
+  appLanguage = next;
+  applyLanguageUI();
+  persistSettings().catch(() => {});
+}
 
 let opfsRootHandle = null;
 
@@ -1003,13 +1313,17 @@ async function loadSettings() {
   if (saved && saved.libraryImportMode === IMPORT_MODE_OPFS && isOpfsSupported()) {
     libraryImportMode = IMPORT_MODE_OPFS;
   }
+  if (saved && (saved.appLanguage === "en" || saved.appLanguage === "de")) {
+    appLanguage = saved.appLanguage;
+  }
+  applyLanguageUI();
   updateRebuildModeUI();
   updateStorageModeUI();
   updateEasyAccessUI();
 }
 
 async function persistSettings() {
-  await idbSet(SETTINGS_KEY, { fastRebuildEnabled, easyAccessEnabled, libraryImportMode });
+  await idbSet(SETTINGS_KEY, { fastRebuildEnabled, easyAccessEnabled, libraryImportMode, appLanguage });
 }
 
 async function loadLibraryCache() {
@@ -1140,16 +1454,16 @@ function updatePlayerVisibility(hasTrack) {
 
 function updateRebuildModeUI() {
   if (!rebuildModeButton) return;
-  rebuildModeButton.textContent = fastRebuildEnabled ? "Fast" : "Full check";
+  rebuildModeButton.textContent = fastRebuildEnabled ? t("rebuildFast") : t("rebuildFull");
   rebuildModeDescEl.textContent = fastRebuildEnabled
-    ? "Fast rebuild (default) uses cached tags and only scans new files."
-    : "Full check re-reads every file, tags, and cover.";
+    ? t("rebuildDescFast")
+    : t("rebuildDescFull");
 }
 
 function updateEasyAccessUI() {
   const toggleBtn = document.getElementById("btnToggleEasyAccess");
   if (toggleBtn) {
-    toggleBtn.textContent = easyAccessEnabled ? "On" : "Off";
+    toggleBtn.textContent = easyAccessEnabled ? t("easyOn") : t("easyOff");
   }
   document.body.classList.toggle("easy-access", easyAccessEnabled);
   updatePlayerVisibility(hasActiveTrack);
@@ -1158,10 +1472,10 @@ function updateEasyAccessUI() {
 function updateStorageModeUI() {
   if (!storageModeButton || !storageModeDescEl) return;
   const usingOpfs = libraryImportMode === IMPORT_MODE_OPFS;
-  storageModeButton.textContent = usingOpfs ? "Import once" : "Keep links";
+  storageModeButton.textContent = usingOpfs ? t("storageImportOnce") : t("storageKeepLinks");
   storageModeDescEl.textContent = usingOpfs
-    ? "Copy picked folders into app storage (OPFS)."
-    : "Keep permanent access to picked folders.";
+    ? t("storageDescImport")
+    : t("storageDescLinks");
 }
 
 function isOpfsSupported() {
@@ -1261,7 +1575,7 @@ async function toggleStorageMode() {
 
   if (granted.length) {
     dirHandles = granted;
-    libInfoEl.textContent = `Reconnected ${dirHandles.length} folder(s). Scanning…`;
+    libInfoEl.textContent = tf("statusReconnectedScanning", { folders: dirHandles.length });
     setStatus("Linked folder mode: scanning saved folders…");
     await scanAndBuildLibraryFromDirs(dirHandles);
   } else {
@@ -1452,8 +1766,8 @@ function buildPlayLaterCollageHtml() {
 function getPlayLaterAlbum() {
   return {
     id: PLAY_LATER_ID,
-    title: "Play later",
-    artist: playLaterTracks.length ? `${playLaterTracks.length} track(s)` : "Add albums with Play later",
+    title: t("playLater"),
+    artist: playLaterTracks.length ? tf("trackCount", { count: playLaterTracks.length }) : t("addAlbumsWithPlayLater"),
     coverUrl: "",
     tracks: [...playLaterTracks],
     isPlayLater: true,
@@ -1530,7 +1844,7 @@ function renderAlbums(albums) {
       queueIndex = 0;
 
       if (!queue.length) {
-        setStatus(a.isPlayLater ? "Your Play later list is empty." : "This album has no tracks to play.");
+        setStatus(a.isPlayLater ? t("statusPlayLaterListEmpty") : t("statusAlbumNoTracksPlay"));
         return;
       }
 
@@ -1549,7 +1863,7 @@ function renderAlbums(albums) {
   if (!albums.length) {
     const emptyMsg = document.createElement("div");
     emptyMsg.style.color = "#a7a7a7";
-    emptyMsg.textContent = "No albums yet. Connect a folder with MP3 or FLAC files.";
+    emptyMsg.textContent = t("noAlbumsYetConnect");
     gridEl.appendChild(emptyMsg);
   }
 
@@ -1586,8 +1900,8 @@ function rerenderPlayLaterTile() {
   const artistEl = tile.querySelector(".artist");
   if (artistEl) {
     artistEl.textContent = playLaterTracks.length
-      ? `${playLaterTracks.length} track(s)`
-      : "Add albums with Play later";
+      ? tf("trackCount", { count: playLaterTracks.length })
+      : t("addAlbumsWithPlayLater");
   }
 
   const coverEl = tile.querySelector(".cover");
@@ -1628,7 +1942,7 @@ function renderTracklist(activeTrackId) {
   if (!album.isPlayLater) {
     const playLaterBtn = document.createElement("button");
     playLaterBtn.type = "button";
-    playLaterBtn.textContent = "Play later";
+    playLaterBtn.textContent = t("playLater");
     playLaterBtn.onclick = () => queueAlbumLater(album.id);
     actions.appendChild(playLaterBtn);
   }
@@ -1636,7 +1950,7 @@ function renderTracklist(activeTrackId) {
   if (album.isPlayLater) {
     const clearBtn = document.createElement("button");
     clearBtn.type = "button";
-    clearBtn.textContent = "Clear Play later";
+    clearBtn.textContent = t("clearPlayLater");
     clearBtn.onclick = clearPlayLater;
     actions.appendChild(clearBtn);
   }
@@ -1649,7 +1963,7 @@ function renderTracklist(activeTrackId) {
 
   if (!album.tracks.length) {
     const empty = document.createElement("div");
-    empty.textContent = album.isPlayLater ? "Play later is empty." : "No tracks in this album.";
+    empty.textContent = album.isPlayLater ? t("playLaterEmpty") : t("noTracksAlbum");
     empty.style.color = "var(--mut)";
     rows.appendChild(empty);
     return;
@@ -1736,8 +2050,8 @@ function renderTracklist(activeTrackId) {
     if (!album.isPlayLater) {
       const addBtn = document.createElement("button");
       addBtn.type = "button";
-      addBtn.textContent = "Play later";
-      addBtn.title = "Add this track to Play later";
+      addBtn.textContent = t("playLater");
+      addBtn.title = t("addTrackToPlayLater");
       addBtn.onclick = (e) => {
         e.stopPropagation();
         queueTrackLater(trackId);
@@ -1746,8 +2060,8 @@ function renderTracklist(activeTrackId) {
     } else {
       const removeBtn = document.createElement("button");
       removeBtn.type = "button";
-      removeBtn.textContent = "Remove";
-      removeBtn.title = "Remove from Play later";
+      removeBtn.textContent = t("remove");
+      removeBtn.title = t("removeFromPlayLater");
       removeBtn.onclick = (e) => {
         e.stopPropagation();
         removeFromPlayLater(trackId);
@@ -1860,7 +2174,7 @@ async function connectFolder() {
         dirHandles = granted;
         await persistDirectories(saved);
         await idbSet("musicDirConnectedAt", Date.now());
-        libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
+        libInfoEl.textContent = tf("statusConnectedScanning", { folders: dirHandles.length });
         setStatus("Folder already connected. Scanning music…");
         await scanAndBuildLibraryFromDirs(dirHandles, { keepExistingIfEmpty: true });
         return;
@@ -1870,7 +2184,7 @@ async function connectFolder() {
       const updatedSaved = [...saved, handle];
       await persistDirectories(updatedSaved);
       await idbSet("musicDirConnectedAt", Date.now());
-      libInfoEl.textContent = `Connected ${dirHandles.length} folder(s). Scanning…`;
+      libInfoEl.textContent = tf("statusConnectedScanning", { folders: dirHandles.length });
       setStatus("Folder added. Scanning music…");
       await scanAndBuildLibraryFromDirs(dirHandles, { keepExistingIfEmpty: true });
     }
@@ -1917,7 +2231,7 @@ async function reconnectFolder() {
     if (granted.length) {
       dirHandles = granted;
       await persistDirectories(saved);
-      libInfoEl.textContent = `Reconnected ${dirHandles.length} folder(s). Scanning…`;
+      libInfoEl.textContent = tf("statusReconnectedScanning", { folders: dirHandles.length });
       setStatus("Reconnected to saved folders. Scanning music…");
       await scanAndBuildLibraryFromDirs(dirHandles);
     } else {
@@ -2254,7 +2568,7 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
       } else {
         readCount++;
         if (readCount % 5 === 0 || readCount === audioCount) {
-          setStatus(`Opening music files to extract metadata and covers… ${readCount}/${audioCount}`);
+          setStatus(tf("statusOpeningFiles", { read: readCount, total: audioCount }));
         } else if (canUseCache && processedCount % 10 === 0) {
           setStatus(`Fast rebuild: restored ${processedCount}/${audioCount} (scanning new files)…`);
         }
@@ -2453,9 +2767,9 @@ async function scanAndBuildLibraryFromDirs(dirs, { keepExistingIfEmpty = false }
 
   renderAlbums(library.albums);
   libInfoEl.textContent = libraryImportMode === IMPORT_MODE_OPFS
-    ? `Using imported library. ${library.albums.length} albums found. Tap an album cover to play.`
-    : `Connected to ${dirs.length} folder(s). ${library.albums.length} albums found. Tap an album cover to play.`;
-  setStatus(`Ready: ${library.albums.length} albums across ${sourceLabel}. Tap an album cover to start.`);
+    ? tf("statusImportedAlbums", { albums: library.albums.length })
+    : tf("statusConnectedAlbums", { folders: dirs.length, albums: library.albums.length });
+  setStatus(tf("statusReadyAlbums", { albums: library.albums.length, source: sourceLabel }));
 
   const savedState = await loadPlayerState();
   if (savedState?.queue?.length) {
@@ -2585,7 +2899,7 @@ async function reconcilePlayLaterAfterLibraryReload(savedState) {
   rerenderPlayLaterTile();
 
   if (missingCount) {
-    setStatus(`Restored Play later list, but ${missingCount} item(s) could not be matched and were removed.`);
+    setStatus(tf("statusRestoredPlayLaterMissing", { count: missingCount }));
   }
 
   await savePlayerState();
@@ -2615,7 +2929,7 @@ function playAlbumNow(albumId) {
 function queueAlbumLater(albumId) {
   const album = getAlbumById(albumId);
   if (!album || !album.tracks.length) {
-    setStatus("This album has no tracks to add.");
+    setStatus(t("statusAlbumNoTracksAdd"));
     return;
   }
 
@@ -2629,10 +2943,8 @@ function queueAlbumLater(albumId) {
   }
 
   if (!newTracks.length) {
-    const duplicateNotice = removedCount
-      ? ` Removed ${removedCount} duplicate(s) already in Play later.`
-      : "";
-    setStatus(`All tracks already in Play later.${duplicateNotice}`.trim());
+    const duplicateNotice = removedCount ? ` ${tf("statusDuplicateRemoved", { count: removedCount })}` : "";
+    setStatus(`${t("statusAllTracksAlreadyPlayLater")}${duplicateNotice}`.trim());
     rerenderPlayLaterTile();
     savePlayerState().catch(() => {});
     return;
@@ -2640,10 +2952,8 @@ function queueAlbumLater(albumId) {
 
   playLaterTracks = [...playLaterTracks, ...newTracks];
 
-  const duplicateNotice = removedCount
-    ? ` Removed ${removedCount} duplicate(s) already in Play later.`
-    : "";
-  setStatus(`Added ${newTracks.length} track(s) to Play later.${duplicateNotice}`);
+  const duplicateNotice = removedCount ? ` ${tf("statusDuplicateRemoved", { count: removedCount })}` : "";
+  setStatus(`${tf("statusAddedTracksToPlayLater", { count: newTracks.length })}${duplicateNotice}`.trim());
   rerenderPlayLaterTile();
   renderAlbums(library.albums);
   if (currentAlbumId === PLAY_LATER_ID) {
@@ -2663,8 +2973,8 @@ function queueTrackLater(trackId) {
 
   if (existingSet.has(trackId)) {
     const parts = [];
-    if (removedCount) parts.push(`Removed ${removedCount} duplicate(s) already in Play later.`);
-    parts.push("Track already in Play later; keeping existing spot.");
+    if (removedCount) parts.push(tf("statusDuplicateRemoved", { count: removedCount }));
+    parts.push(t("statusTrackAlreadyPlayLater"));
     setStatus(parts.join(" "));
     rerenderPlayLaterTile();
     renderAlbums(library.albums);
@@ -2677,10 +2987,8 @@ function queueTrackLater(trackId) {
   }
 
   playLaterTracks.push(trackId);
-  const duplicateNotice = removedCount
-    ? ` Removed ${removedCount} duplicate(s) already in Play later.`
-    : "";
-  setStatus(`Added to Play later.${duplicateNotice}`);
+  const duplicateNotice = removedCount ? ` ${tf("statusDuplicateRemoved", { count: removedCount })}` : "";
+  setStatus(`${t("statusAddedToPlayLater")}${duplicateNotice}`.trim());
   renderAlbums(library.albums);
   if (currentAlbumId === PLAY_LATER_ID) {
     const activeTrackId = queue[queueIndex] ?? null;
@@ -2691,12 +2999,12 @@ function queueTrackLater(trackId) {
 
 function clearPlayLater() {
   if (!playLaterTracks.length) {
-    setStatus("Play later is already empty.");
+    setStatus(t("statusPlayLaterAlreadyEmpty"));
     return;
   }
 
   playLaterTracks = [];
-  setStatus("Play later cleared.");
+  setStatus(t("statusPlayLaterCleared"));
   renderAlbums(library.albums);
   if (currentAlbumId === PLAY_LATER_ID) {
     const activeTrackId = queue[queueIndex] ?? null;
@@ -2708,12 +3016,12 @@ function clearPlayLater() {
 function removeFromPlayLater(trackId) {
   const idx = playLaterTracks.indexOf(trackId);
   if (idx === -1) {
-    setStatus("Track not found in Play later.");
+    setStatus(t("statusTrackNotFoundInPlayLater"));
     return;
   }
 
   playLaterTracks.splice(idx, 1);
-  setStatus("Removed from Play later.");
+  setStatus(t("statusRemovedFromPlayLater"));
   renderAlbums(library.albums);
   if (currentAlbumId === PLAY_LATER_ID) {
     const activeTrackId = queue[queueIndex] ?? null;
@@ -2749,7 +3057,7 @@ async function clearLibrary() {
   setNowPlayingUI(null);
   goToAlbumsView();
   libInfoEl.textContent = "No folder connected yet. Tap “Add Music”.";
-  setStatus("Library cleared. Use Add Music to connect folders again.");
+  setStatus(t("statusLibraryCleared"));
   savePlayerState().catch(() => {});
 }
 

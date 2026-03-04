@@ -49,6 +49,16 @@
       background:var(--card); color:var(--fg); border:1px solid var(--line); cursor:pointer; }
     .panel .modeRow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:10px 0 4px; }
     .panel .modeRow .pill { width:auto; min-width:90px; padding:10px 12px; border-radius:999px; }
+    .panel .modeRow select {
+      width:auto;
+      min-width:120px;
+      padding:8px 10px;
+      border-radius:12px;
+      background:var(--card);
+      color:var(--fg);
+      border:1px solid var(--line);
+      cursor:pointer;
+    }
 
     /* Player bar */
     .player {
@@ -93,7 +103,7 @@
       position:fixed; inset:0; z-index:6;
       background:var(--bg);
       display:none;
-      padding:16px 16px 140px;
+      padding:0 16px 140px;
       overflow-y:auto;
     }
     .nowView.open { display:block; }
@@ -209,11 +219,18 @@
       display:flex;
       flex-direction:column;
       align-items:center;
-      gap:16px;
+      gap:10px;
     }
     .titleView .bigCover {
       width:min(640px, 94vw);
-      margin-top:12px;
+      margin: auto 0;
+      flex:0 0 auto;
+      min-height:180px;
+      max-height:calc(100vh - 330px);
+    }
+    .titleView .bigCover img { object-fit:contain; }
+    .titleView .bigCover.spectrogram-active {
+      max-height:min(calc(100vh - 330px), min(640px, 94vw));
     }
     .titleClose {
       position:absolute;
@@ -246,7 +263,7 @@
       height:36px;
     }
     .titleControls { width:min(680px, 94vw); }
-    .titleControls button { height:76px; font-size:26px; }
+    .titleControls button { height:76px; font-size:26px; color:#fff; }
 
     body.title-view-open .player,
     body.title-view-open .easyPlayer { display:none !important; }
@@ -267,7 +284,6 @@
       flex-direction:column;
       align-items:center;
       gap:16px;
-      width:min(900px, 94vw);
     }
     .coverGalleryImage {
       width:100%;
@@ -280,19 +296,33 @@
     }
     .coverGalleryControls {
       display:flex;
-      gap:12px;
+      flex-direction:column;
+      gap:10px;
       position:fixed;
       left:0;
       right:0;
       bottom:24px;
       justify-content:center;
+      align-items:center;
       padding:0 16px;
     }
+    .coverGalleryControlsRow {
+      display:flex;
+      gap:10px;
+      justify-content:center;
+      flex-wrap:wrap;
+    }
     .coverGalleryControls button {
-      height:72px;
-      min-width:72px;
-      font-size:28px;
-      border-radius:18px;
+      height:64px;
+      min-width:64px;
+      font-size:24px;
+      border-radius:16px;
+    }
+    .coverGalleryControls button.compact {
+      min-width:52px;
+      height:52px;
+      font-size:18px;
+      padding:0 10px;
     }
     .coverGalleryClose {
       position:absolute;
@@ -321,6 +351,9 @@
       overflow:hidden;
       cursor:pointer;
       align-items:center;
+      position:sticky;
+      top:0;
+      z-index:2;
     }
     .nowAlbumPreview .thumb {
       width:52px;
@@ -420,28 +453,38 @@
   <!-- Drawer -->
   <div class="drawer" id="drawer" aria-hidden="true">
     <div class="panel">
-      <h2>Library</h2>
+      <h2 id="drawerTitle">Library</h2>
       <div class="small" id="libInfo">No folder connected yet.</div>
       <div class="modeRow">
         <div>
-          <div class="small">Rebuild speed</div>
+          <div class="small" id="labelRebuildSpeed">Rebuild speed</div>
           <div class="small" id="rebuildModeDesc">Fast rebuild (default)</div>
         </div>
         <button id="btnToggleRebuildMode" class="pill">Fast</button>
       </div>
       <div class="modeRow">
         <div>
-          <div class="small">Library storage</div>
+          <div class="small" id="labelLibraryStorage">Library storage</div>
           <div class="small" id="storageModeDesc">Keep permanent access to picked folders.</div>
         </div>
         <button id="btnToggleStorageMode" class="pill">Keep links</button>
       </div>
       <div class="modeRow">
         <div>
-          <div class="small">Easy access mode</div>
-          <div class="small">Larger tiles and big controls</div>
+          <div class="small" id="labelEasyAccessMode">Easy access mode</div>
+          <div class="small" id="easyAccessDesc">Larger tiles and big controls</div>
         </div>
         <button id="btnToggleEasyAccess" class="pill">Off</button>
+      </div>
+      <div class="modeRow">
+        <div>
+          <div class="small" id="labelLanguage">Language</div>
+          <div class="small" id="languageDesc">Choose app language</div>
+        </div>
+        <select id="selectLanguage" aria-label="Language">
+          <option value="en">English</option>
+          <option value="de">Deutsch</option>
+        </select>
       </div>
       <button id="btnReconnect">Reconnect / Request Permission</button>
       <button id="btnConnect">Add Music</button>
@@ -478,10 +521,10 @@
       <span id="titleTimeDuration">0:00</span>
     </div>
     <div class="bigControls titleControls">
-      <button id="btnTitlePrev">⏮</button>
-      <button id="btnTitlePlay">⏯</button>
-      <button id="btnTitleNext">⏭</button>
-      <button id="btnTitleStop">⏹</button>
+      <button id="btnTitlePrev">⏮&#xFE0E;</button>
+      <button id="btnTitlePlay">⏯&#xFE0E;</button>
+      <button id="btnTitleNext">⏭&#xFE0E;</button>
+      <button id="btnTitleStop">⏹&#xFE0E;</button>
     </div>
   </div>
 
@@ -490,8 +533,18 @@
     <div class="coverGalleryInner">
       <img class="coverGalleryImage" id="coverGalleryImage" alt="Album cover">
       <div class="coverGalleryControls">
-        <button type="button" id="btnCoverGalleryPrev">◀</button>
-        <button type="button" id="btnCoverGalleryNext">▶</button>
+        <div class="coverGalleryControlsRow">
+          <button type="button" id="btnCoverToggleStar" class="compact" title="Toggle star">☆</button>
+          <button type="button" id="btnCoverTiltLeft" class="compact" title="Tilt left">↺</button>
+          <button type="button" id="btnCoverTiltRight" class="compact" title="Tilt right">↻</button>
+          <button type="button" id="btnCoverCropRight" class="compact" title="Crop right">⇥</button>
+          <button type="button" id="btnCoverApplyFilter" class="compact" title="Apply selected transform">Apply</button>
+          <button type="button" id="btnCoverUndoFilter" class="compact" title="Undo last transform">Undo</button>
+        </div>
+        <div class="coverGalleryControlsRow">
+          <button type="button" id="btnCoverGalleryPrev">◀</button>
+          <button type="button" id="btnCoverGalleryNext">▶</button>
+        </div>
       </div>
     </div>
   </div>
